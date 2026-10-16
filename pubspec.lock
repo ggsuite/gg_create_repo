@@ -145,6 +145,102 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.2.0"
+  dna_blog:
+    dependency: transitive
+    description:
+      name: dna_blog
+      sha256: fb03e9e4cf1a472252acd3f7d98d14314ee3fa9c61029e1742183cbba6176be6
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.0"
+  dna_clean_code:
+    dependency: transitive
+    description:
+      name: dna_clean_code
+      sha256: "1d91d144c80c31b34a78580e629522264b3acfe35326ee13a379706f72fa1d40"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.1"
+  dna_gg:
+    dependency: transitive
+    description:
+      name: dna_gg
+      sha256: "73d764c7bdf4b624c871ac4b77e91ed0234cb59e643d175451e015fc7940b937"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.9.0"
+  dna_ggsuite:
+    dependency: "direct dev"
+    description:
+      name: dna_ggsuite
+      sha256: eb07ba88d42a2e56eb182bfc11ca8b188f14d4347055123775105840ec789b8d
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.4.0"
+  dna_github:
+    dependency: transitive
+    description:
+      name: dna_github
+      sha256: "4d11a297d838f197dfbbebb488e37e8f5a195a2945622e93b57c792bb8685a94"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.0"
+  dna_guides:
+    dependency: transitive
+    description:
+      name: dna_guides
+      sha256: aec729d7b5901715ae1c97ba80c920da4f1904ec958e7d46ba11fe376e1b1a08
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.0"
+  dna_index:
+    dependency: transitive
+    description:
+      name: dna_index
+      sha256: "46ef1b45e9cbd0a8c57e2ab35a24540f0af0572e6aae87b775039121eed17801"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.0"
+  dna_install:
+    dependency: transitive
+    description:
+      name: dna_install
+      sha256: ff9d22a1c0d8297e30e3e17944c9dea4528a652ad93d64c57c1aa0ad2408888d
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.0"
+  dna_readme:
+    dependency: transitive
+    description:
+      name: dna_readme
+      sha256: b8b6152769bdbba3d8597c3c4e667d900dbb6b63bdd7f1331d402726a8dd3c6d
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.3.0"
+  dna_scripts:
+    dependency: transitive
+    description:
+      name: dna_scripts
+      sha256: cf5dffa1242fe06668c77664d65e1b86fc0db5127da636ead6f212e47e2127ba
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.3.0"
+  dna_translate:
+    dependency: transitive
+    description:
+      name: dna_translate
+      sha256: "06aadc3f20e2d0c81cfed89a7ed28e15ece41860b33b2b7912fd9e9179319965"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.0"
+  dna_vscode:
+    dependency: transitive
+    description:
+      name: dna_vscode
+      sha256: "84912400705b25abc8abc377c3f1c603a2ed5968f20ae42b7ddf6a6ff32fac48"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.4.0"
   ffi:
     dependency: transitive
     description:
