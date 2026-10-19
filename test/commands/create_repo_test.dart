@@ -316,8 +316,8 @@ void main() {
                     earlier: captureAny(named: 'earlier'),
                   ),
                 ).captured.single
-                as RepoSpec? Function(RepoSpec);
-        expect(find(RepoSpec.example())?.description, 'x' * 70);
+                as CreateRepoState? Function(RepoSpec);
+        expect(find(RepoSpec.example())?.spec.description, 'x' * 70);
         expect(find(RepoSpec.example(name: 'gg_other')), isNull);
       });
 

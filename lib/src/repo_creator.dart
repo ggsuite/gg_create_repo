@@ -100,8 +100,9 @@ class RepoCreator {
   late final RunDna _dnaRunner = _runDna ?? helixDnaRunner(ggLog);
 
   static final _networkError = RegExp(
-    'Could not resolve host|Connection (refused|reset|timed out)|'
-    'timed out|Failed to connect|early EOF',
+    'Could not resolve host|Connection (was )?(refused|reset|closed|timed '
+    'out)|timed out|Failed to connect|early EOF|returned error: 5[0-9][0-9]|'
+    'not closed cleanly',
     caseSensitive: false,
   );
 

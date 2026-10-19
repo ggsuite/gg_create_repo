@@ -29,6 +29,7 @@ void main() {
       expect(gitReadableUrl('git+https://x/y.git'), 'https://x/y.git');
       expect(gitReadableUrl('git+ssh://git@x/y'), 'ssh://git@x/y');
       expect(gitReadableUrl('https://x/y'), 'https://x/y');
+      expect(gitReadableUrl('git+https://x/y.git#v1'), 'https://x/y.git');
     });
   });
 }

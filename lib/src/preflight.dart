@@ -244,6 +244,14 @@ class Preflight {
     void Function(String) warn,
   ) async {
     for (final layer in spec.dnaLayers) {
+      final isDart = spec.language == RepoLanguage.dart;
+      if (isDart && (layer.startsWith('git+') || layer.contains('#'))) {
+        error(
+          'The DNA layer $layer is written for npm; pub needs the plain git '
+          'URL.',
+        );
+        continue;
+      }
       if (isGitUrl(layer)) {
         try {
           await _tools.run('git', [
@@ -277,7 +285,10 @@ class Preflight {
       host: host,
     );
     broken.forEach(
-      (layer, reason) => error('The DNA config of $layer is broken: $reason'),
+      (layer, reason) => warn(
+        'The local copy of $layer has a broken DNA config ($reason); its '
+        'required variables are only known once it is installed.',
+      ),
     );
     for (final layer in unresolved) {
       warn(

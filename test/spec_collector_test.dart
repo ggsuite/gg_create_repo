@@ -503,7 +503,7 @@ void main() {
                 _Host(),
                 earlier: (draft) {
                   drafts.add(draft);
-                  return earlier;
+                  return CreateRepoState(spec: earlier);
                 },
               );
 
@@ -539,15 +539,33 @@ void main() {
                   org: 'ggsuite',
                 ),
                 _Host(),
-                earlier: (_) => RepoSpec.example(
-                  name: 'my-lib',
-                  language: RepoLanguage.typescript,
-                  npmScope: 'acme',
-                  dnaLayers: [],
+                earlier: (_) => CreateRepoState(
+                  spec: RepoSpec.example(
+                    name: 'my-lib',
+                    language: RepoLanguage.typescript,
+                    npmScope: 'acme',
+                    dnaLayers: [],
+                  ),
                 ),
               );
           expect(result.spec.dnaLayers, isEmpty);
           expect(result.spec.npmScope, 'acme');
+        });
+
+        test('must be continued in its language', () async {
+          await expectLater(
+            collector(_ScriptedPrompts([0]), terminal: true).collect(
+              const RepoOptions(name: 'my_lib', org: 'ggsuite'),
+              _Host(),
+              earlier: (_) => CreateRepoState(
+                spec: RepoSpec.example(
+                  name: 'my_lib',
+                  language: RepoLanguage.typescript,
+                ),
+              ),
+            ),
+            throwsWith('is TypeScript'),
+          );
         });
       });
 
@@ -694,6 +712,23 @@ void main() {
               ),
             },
           );
+
+          test('are not asked once the earlier run added the DNA', () async {
+            final result =
+                await collector(_ScriptedPrompts([]), terminal: false).collect(
+                  const RepoOptions(
+                    name: 'gg_example_repo',
+                    language: 'dart',
+                    org: 'ggsuite',
+                  ),
+                  host(),
+                  earlier: (_) => CreateRepoState(
+                    spec: RepoSpec.example(dnaLayers: ['dna_ggsuite']),
+                    done: {CreateStep.dna},
+                  ),
+                );
+            expect(result.spec.vars, isEmpty);
+          });
 
           test('asks for the required ones', () async {
             final prompts = _ScriptedPrompts(['', 'Acme']);

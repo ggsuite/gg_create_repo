@@ -15,6 +15,10 @@ bool isGitUrl(String ref) =>
     ref.endsWith('.git') ||
     RegExp(r'^[^@/\s]+@[^:/\s]+:').hasMatch(ref);
 
-/// [ref] the way git itself reads it: without the `git+` of npm.
-String gitReadableUrl(String ref) =>
-    ref.startsWith('git+') ? ref.substring('git+'.length) : ref;
+/// [ref] the way git itself reads it: without the `git+` and the `#ref`
+/// of npm.
+String gitReadableUrl(String ref) {
+  final url = ref.startsWith('git+') ? ref.substring('git+'.length) : ref;
+  final hash = url.indexOf('#');
+  return hash < 0 ? url : url.substring(0, hash);
+}

@@ -9,6 +9,7 @@
 ### Changed
 
 - Harden resume, preflight and DNA checks
+- Retry more network errors and keep a resume going
 
 ### Fixed
 

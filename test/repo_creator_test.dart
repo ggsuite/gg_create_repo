@@ -491,6 +491,22 @@ void main() {
       expect(delays, isEmpty);
     });
 
+    test('retries a connection the server reset', () async {
+      processes
+        ..failingPushes = 1
+        ..pushError =
+            'fatal: unable to access: Recv failure: Connection was reset';
+      final spec = RepoSpec.example(dnaLayers: []);
+      dir = host.targetDir(spec);
+
+      await creator().create(
+        state: CreateRepoState(spec: spec),
+        directory: dir,
+        host: host,
+      );
+      expect(delays, hasLength(1));
+    });
+
     test('does not retry a push the server refused', () async {
       processes
         ..failingPushes = 1

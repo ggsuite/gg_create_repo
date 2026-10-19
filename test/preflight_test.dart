@@ -430,27 +430,34 @@ void main() {
         ]);
       });
 
-      test('reads a git+ URL of npm without the git+', () async {
-        const url = 'git+https://example.invalid/org/dna_z.git';
+      test('reads a git+ URL of npm without git+ and #ref', () async {
+        answer(api('repos/ggsuite/my-lib', '.private'), () => _http(404));
+        const url = 'git+https://example.invalid/org/dna-z.git#main';
         answer(
-          'git ls-remote --heads https://example.invalid/org/dna_z.git',
+          'git ls-remote --heads https://example.invalid/org/dna-z.git',
           _ok,
         );
-        expect(await errors(spec: withDna([url])), isEmpty);
+        final spec = withDna([url], language: RepoLanguage.typescript);
+        expect(await errors(spec: spec), isEmpty);
       });
 
-      test('refuses a layer whose local config is broken', () async {
+      test('refuses a git URL written for npm in a Dart repo', () async {
+        const url = 'git+https://example.invalid/org/dna_z.git';
+        expect(await errors(spec: withDna([url])), [
+          contains('written for npm'),
+        ]);
+      });
+
+      test('warns about a layer whose local config is broken', () async {
         final broken = Directory(p.join(root.path, 'dna_broken'));
         File(p.join(broken.path, 'dna', '_dna.json'))
           ..createSync(recursive: true)
           ..writeAsStringSync('{"layers": 3}');
-        expect(
-          await errors(
-            spec: withDna(['dna_broken']),
-            on: host(layers: {'dna_broken': broken}),
-          ),
-          [contains('The DNA config of dna_broken is broken')],
-        );
+        final on = host(layers: {'dna_broken': broken});
+        expect(await errors(spec: withDna(['dna_broken']), on: on), isEmpty);
+        expect(await warnings(spec: withDna(['dna_broken']), on: on), [
+          contains('The local copy of dna_broken has a broken DNA config'),
+        ]);
       });
 
       test('refuses an npm layer for a Dart repository', () async {

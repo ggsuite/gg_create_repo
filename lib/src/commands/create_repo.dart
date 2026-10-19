@@ -80,7 +80,7 @@ class CreateRepo extends Command<dynamic> {
     final collected = await _collector.collect(
       options,
       host,
-      earlier: (draft) => CreateRepoState.load(host.targetDir(draft))?.spec,
+      earlier: (draft) => CreateRepoState.load(host.targetDir(draft)),
     );
     var spec = collected.spec;
     final directory = host.targetDir(spec);
@@ -181,8 +181,8 @@ class CreateRepo extends Command<dynamic> {
       throw Exception(
         cError('The DNA was added already, without ${newVars.join(', ')}. ') +
             cAction(
-              'Set it in dna/_vars.json and run »gg dna build« once the '
-              'repository is created.',
+              'Run again without it, then set it in dna/_vars.json and run '
+              '»gg dna build« in the repository.',
             ),
       );
     }

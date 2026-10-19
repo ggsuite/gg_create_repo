@@ -9,6 +9,7 @@ import 'package:gg_interact/gg_interact.dart';
 import 'package:gg_log/gg_log.dart';
 import 'package:mocktail/mocktail.dart';
 
+import 'create_repo_state.dart';
 import 'dna/dna_variables.dart';
 import 'github.dart';
 import 'registry.dart';
@@ -53,12 +54,12 @@ class SpecCollector {
 
   // ...........................................................................
   /// The spec for [options] and whether a question was asked. [earlier]
-  /// finds the spec of an earlier run for language, org and name; its
-  /// values stand in for every option not given.
+  /// finds an earlier run for language, org and name; its values stand in
+  /// for every option not given.
   Future<CollectedSpec> collect(
     RepoOptions options,
     RepoHost host, {
-    RepoSpec? Function(RepoSpec draft)? earlier,
+    CreateRepoState? Function(RepoSpec draft)? earlier,
   }) async {
     final run = _Run(this, options);
     final language = options.language != null
@@ -80,7 +81,8 @@ class SpecCollector {
       RepoSpec(name: name, language: language, org: org, description: ''),
     );
     if (previous != null) {
-      options = run.options = options.withDefaultsOf(previous);
+      _sameLanguage(previous.spec, language);
+      options = run.options = options.withDefaultsOf(previous.spec);
     }
     final description = await run.text(
       options.description,
@@ -121,7 +123,8 @@ class SpecCollector {
       npmScope: isDart ? null : await _scope(run, org),
     );
     final layers = await _dna(run, host, draft);
-    final vars = await _vars(run, host, layers);
+    final dnaDone = previous?.done.contains(CreateStep.dna) ?? false;
+    final vars = await _vars(run, host, dnaDone ? const [] : layers);
     return (
       spec: draft.copyWith(dnaLayers: layers, vars: vars),
       asked: run.asked,
@@ -164,6 +167,17 @@ class SpecCollector {
     } on ArgumentError {
       throw Exception(cError('»$value« is no language. Use dart or ts.'));
     }
+  }
+
+  // ...........................................................................
+  void _sameLanguage(RepoSpec earlier, RepoLanguage language) {
+    if (earlier.language == language) return;
+    throw Exception(
+      cError(
+            'The earlier run of ${earlier.slug} is ${earlier.language.label}. ',
+          ) +
+          cAction('Continue it in ${earlier.language.label}.'),
+    );
   }
 
   // ...........................................................................
