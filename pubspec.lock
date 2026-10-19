@@ -324,10 +324,9 @@ packages:
   gg_interact:
     dependency: "direct main"
     description:
-      name: gg_interact
-      sha256: "03cb7f952ea01f52c92c7ad632b63dc5999b76274eb7b094d86cf0bc2df5d04e"
-      url: "https://pub.dev"
-    source: hosted
+      path: "../gg_interact"
+      relative: true
+    source: path
     version: "0.0.2"
   gg_is_flutter:
     dependency: transitive
@@ -372,18 +371,16 @@ packages:
   gg_one_commit:
     dependency: "direct main"
     description:
-      name: gg_one_commit
-      sha256: "9643c89a80e61ee282ea54b0215fdcbf37da8c4531664ab29b3287f379edc0e8"
-      url: "https://pub.dev"
-    source: hosted
+      path: "../gg_one_commit"
+      relative: true
+    source: path
     version: "2.8.5"
   gg_one_core:
     dependency: "direct main"
     description:
-      name: gg_one_core
-      sha256: "3f3fc58088ff802f96a98236ec16418846642cc16d45fcacc4452bb52352943b"
-      url: "https://pub.dev"
-    source: hosted
+      path: "../gg_one_core"
+      relative: true
+    source: path
     version: "2.14.0"
   gg_process:
     dependency: "direct main"
