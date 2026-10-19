@@ -9,11 +9,11 @@ library;
 
 export 'src/commands/create_repo.dart' show CreateRepo, HostFactory;
 export 'src/create_repo_state.dart' show CreateRepoState, CreateStep;
-export 'src/dna/gg_dna.dart' show GgDna, helixSelectPrompt, helixTextPrompt;
+export 'src/dna/gg_dna.dart' show GgDna, RunDna, helixDnaRunner;
+export 'src/dna/git_url.dart' show gitReadableUrl, isGitUrl;
 export 'src/preflight.dart'
     show Finding, FindingLevel, MockPreflight, Preflight;
-export 'src/repo_creator.dart'
-    show MockRepoCreator, RepoCreator, RunChecks, RunDna;
+export 'src/repo_creator.dart' show MockRepoCreator, RepoCreator, RunChecks;
 export 'src/repo_host.dart' show DnaCandidate, RepoHost, StandaloneHost;
 export 'src/repo_language.dart' show RepoLanguage;
 export 'src/repo_options.dart' show RepoOptions;

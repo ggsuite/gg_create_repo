@@ -23,7 +23,10 @@ void main() {
 
       test('rejects empty and too long names', () {
         expect(v.name('', dart), contains('empty'));
-        expect(v.name('a' * 101, dart), contains('100'));
+        expect(v.name('a' * 64, dart), isNull);
+        expect(v.name('a' * 65, dart), contains('64'));
+        expect(v.name('a' * 100, ts), isNull);
+        expect(v.name('a' * 101, ts), contains('100'));
       });
 
       test('rejects Windows device names', () {
@@ -41,12 +44,20 @@ void main() {
       test('rejects the dependencies of the skeleton', () {
         expect(v.name('lints', dart), contains('dependency of the skeleton'));
         expect(v.name('gg_log', dart), contains('dependency'));
+        expect(v.name('path', dart), contains('dependency'));
+        expect(v.name('vector_math', dart), contains('dependency'));
       });
 
       test('rejects names whose class clashes with another one', () {
         expect(v.name('string', dart), contains('»String«'));
         expect(v.name('my_command', dart), contains('»MyCommand«'));
         expect(v.name('gg_command_runner', dart), contains('clash'));
+      });
+
+      test('rejects TypeScript names that hide a global type', () {
+        expect(v.name('partial', ts), contains('»Partial«'));
+        expect(v.name('promise', ts), contains('global'));
+        expect(v.name('my-promise', ts), isNull);
       });
 
       test('rejects the TypeScript name index', () {
@@ -115,15 +126,26 @@ void main() {
     });
 
     group('variable()', () {
-      test('accepts key=value', () {
-        expect(v.variable('a=b'), isNull);
-        expect(v.variable('a='), isNull);
-        expect(v.variable('a=b=c'), isNull);
+      test('accepts DNA variables with a value', () {
+        expect(v.variable('dnaCompany=Acme'), isNull);
+        expect(v.variable('dnaA1=b=c'), isNull);
+        expect(v.variable(' dnaCompany = Acme '), isNull);
       });
 
       test('rejects pairs without a key', () {
         expect(v.variable('ab'), contains('key=value'));
         expect(v.variable('=b'), contains('key=value'));
+      });
+
+      test('rejects keys helix does not read', () {
+        expect(v.variable('company=Acme'), contains('no DNA variable'));
+        expect(v.variable('dnacompany=Acme'), contains('dnaProjectName'));
+        expect(v.variable('dna_company=Acme'), contains('no DNA variable'));
+      });
+
+      test('rejects empty values', () {
+        expect(v.variable('dnaCompany='), contains('needs a value'));
+        expect(v.variable('dnaCompany=  '), contains('needs a value'));
       });
     });
   });

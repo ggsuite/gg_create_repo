@@ -83,6 +83,7 @@ class RepoSpec {
     'npmScope': _npmScope,
   };
 
+  // ...........................................................................
   /// A copy with the DNA layers and variables replaced.
   RepoSpec copyWith({List<String>? dnaLayers, Map<String, String>? vars}) =>
       RepoSpec(

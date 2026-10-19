@@ -39,9 +39,14 @@ class DnaVariables {
   factory DnaVariables.example() => const DnaVariables();
 
   // ...........................................................................
-  /// The variables [layers] require that [given] does not set, and the
-  /// layers no local copy was found for.
-  ({List<MissingDnaVariable> missing, List<String> unresolved}) missing({
+  /// The variables [layers] require that [given] does not set, the layers
+  /// no local copy was found for and those whose config is broken.
+  ({
+    List<MissingDnaVariable> missing,
+    List<String> unresolved,
+    Map<String, String> broken,
+  })
+  missing({
     required List<String> layers,
     required Map<String, String> given,
     required RepoHost host,
@@ -63,6 +68,7 @@ class DnaVariables {
             MissingDnaVariable(name: entry.key, requiredBy: entry.value),
       ],
       unresolved: graph.unresolved.toList(),
+      broken: graph.broken,
     );
   }
 }
@@ -76,8 +82,11 @@ class _Graph {
   /// Per layer: variable → the layer whose `true` its children inherit.
   final passedOn = <String, Map<String, String>>{};
 
-  /// Layers without a local copy, or with one that cannot be read.
+  /// Layers without a local copy.
   final unresolved = <String>{};
+
+  /// Layers whose local config cannot be read, with the reason.
+  final broken = <String, String>{};
 
   /// Layers being visited; a cycle stops at them.
   final _visiting = <String>{};
@@ -85,13 +94,14 @@ class _Graph {
   // ...........................................................................
   void visit(String layer) {
     if (passedOn.containsKey(layer) || unresolved.contains(layer)) return;
-    if (!_visiting.add(layer)) return;
+    if (broken.containsKey(layer) || !_visiting.add(layer)) return;
     final dir = host.layerDir(layer);
-    final config = dir == null ? null : _config(dir, layer);
-    if (config == null) {
+    if (dir == null) {
       unresolved.add(layer);
       return;
     }
+    final config = _config(dir, layer);
+    if (config == null) return;
     final inherited = <String, String>{};
     for (final parent in config.layers) {
       visit(parent);
@@ -113,7 +123,8 @@ class _Graph {
       return helix
           .readDnaConfig(helix.IoDnaHost(), dir.path, packageLabel: layer)
           .config;
-    } on FormatException {
+    } on FormatException catch (e) {
+      broken[layer] = e.message;
       return null;
     }
   }

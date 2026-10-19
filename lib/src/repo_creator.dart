@@ -6,7 +6,6 @@
 
 import 'dart:io';
 
-import 'package:args/command_runner.dart';
 import 'package:gg_console_colors/gg_console_colors.dart';
 import 'package:gg_log/gg_log.dart';
 import 'package:gg_one_commit/gg_one_commit.dart';
@@ -24,9 +23,6 @@ import 'repo_spec.dart';
 import 'scaffold/common_files.dart';
 import 'scaffold/scaffold.dart';
 import 'tools.dart';
-
-/// Runs one `gg dna` command with [args]; the seam of the tests.
-typedef RunDna = Future<void> Function(List<String> args);
 
 /// Runs the gg checks in [directory] and records them in `.gg/gg.json`.
 typedef RunChecks = Future<void> Function(Directory directory, GgLog ggLog);
@@ -54,12 +50,14 @@ class RepoCreator {
     GitHub? gitHub,
     RunDna? runDna,
     RunChecks? runChecks,
+    Future<void> Function(Duration)? delay,
   }) => RepoCreator(
     ggLog: ggLog ?? (_) {},
     tools: tools,
     gitHub: gitHub,
     runDna: runDna,
     runChecks: runChecks,
+    delay: delay,
   );
 
   // ...........................................................................
@@ -99,13 +97,15 @@ class RepoCreator {
   final Future<void> Function(Duration) _delay;
 
   /// helix' commands are built on the first use, not with every gg call.
-  late final RunDna _dnaRunner = _runDna ?? _helixDna(ggLog);
+  late final RunDna _dnaRunner = _runDna ?? helixDnaRunner(ggLog);
 
   static final _networkError = RegExp(
     'Could not resolve host|Connection (refused|reset|timed out)|'
-    'timed out|unable to access|Could not read from remote|early EOF',
+    'timed out|Failed to connect|early EOF',
     caseSensitive: false,
   );
+
+  static final _layers = RegExp(r'"layers"\s*:\s*\[[^\]]*\]');
 
   // ...........................................................................
   Future<void> _run(
@@ -161,10 +161,29 @@ class RepoCreator {
           .edit((vars) => vars.addAll(spec.vars));
     }
     final language = spec.language == RepoLanguage.dart ? 'dart' : 'typescript';
-    await _dnaRunner(['init', '--target', dir.path, '--language', language]);
+    await _dnaRunner([
+      'init',
+      '--target',
+      dir.path,
+      '--language',
+      language,
+      '--quiet',
+    ]);
+    _withoutProposedLayers(dir);
     for (final layer in spec.dnaLayers) {
       await _dnaRunner(['add', layer, '--target', dir.path]);
     }
+  }
+
+  // ...........................................................................
+  /// `gg dna init` proposes the DNA packages the skeleton depends on, like
+  /// gg_args; only the chosen layers are applied, in their order.
+  void _withoutProposedLayers(Directory dir) {
+    final file = File(p.join(dir.path, 'dna', '_dna.json'));
+    if (!file.existsSync()) return;
+    file.writeAsStringSync(
+      file.readAsStringSync().replaceFirst(_layers, '"layers": []'),
+    );
   }
 
   // ...........................................................................
@@ -270,13 +289,6 @@ class RepoCreator {
 
   // ...........................................................................
   // coverage:ignore-start
-  static RunDna _helixDna(GgLog ggLog) {
-    final runner = CommandRunner<dynamic>('gg', 'gg')
-      ..addCommand(GgDna(ggLog: ggLog));
-    return (args) => runner.run(['dna', ...args]);
-  }
-
-  // ...........................................................................
   static Future<void> _ggChecks(Directory dir, GgLog ggLog) async {
     await CanCommit(ggLog: ggLog).exec(directory: dir, ggLog: ggLog);
     await DoCommit(ggLog: ggLog).exec(

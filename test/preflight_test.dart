@@ -227,6 +227,12 @@ void main() {
         expect(await errors(), [contains('not logged in')]);
       });
 
+      test('without gh, GitHub is not asked', () async {
+        answer('gh --version', () => null);
+        expect(await errors(), [contains('»gh« is not installed')]);
+        expect(processes.calls.where((c) => c.startsWith('gh api')), isEmpty);
+      });
+
       test('Dart needs dart, Flutter needs flutter', () async {
         answer('dart --version', () => null);
         expect(await errors(), ['dart is not installed.']);
@@ -424,6 +430,29 @@ void main() {
         ]);
       });
 
+      test('reads a git+ URL of npm without the git+', () async {
+        const url = 'git+https://example.invalid/org/dna_z.git';
+        answer(
+          'git ls-remote --heads https://example.invalid/org/dna_z.git',
+          _ok,
+        );
+        expect(await errors(spec: withDna([url])), isEmpty);
+      });
+
+      test('refuses a layer whose local config is broken', () async {
+        final broken = Directory(p.join(root.path, 'dna_broken'));
+        File(p.join(broken.path, 'dna', '_dna.json'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('{"layers": 3}');
+        expect(
+          await errors(
+            spec: withDna(['dna_broken']),
+            on: host(layers: {'dna_broken': broken}),
+          ),
+          [contains('The DNA config of dna_broken is broken')],
+        );
+      });
+
       test('refuses an npm layer for a Dart repository', () async {
         expect(await errors(spec: withDna(['@tssuite/dna-tssuite'])), [
           contains('is an npm package'),
@@ -474,22 +503,6 @@ void main() {
           ),
           [contains('The required variables of dna_other')],
         );
-      });
-
-      test('isGitUrl() follows the rules of helix', () {
-        for (final url in [
-          'https://x/y',
-          'http://x/y',
-          'git://x/y',
-          'git+ssh://x/y',
-          'ssh://x/y',
-          'local/path.git',
-          'git@github.com:o/r',
-        ]) {
-          expect(Preflight.isGitUrl(url), isTrue, reason: url);
-        }
-        expect(Preflight.isGitUrl('dna_ggsuite'), isFalse);
-        expect(Preflight.isGitUrl('@tssuite/dna-tssuite'), isFalse);
       });
     });
 

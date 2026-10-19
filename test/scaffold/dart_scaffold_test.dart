@@ -86,7 +86,7 @@ void main() {
         );
         expect(
           read('test/gg_example_repo_test.dart'),
-          contains("import 'package:test/test.dart';"),
+          contains("import 'package:test/test.dart' show expect, group, test;"),
         );
         final example = read('example/gg_example_repo_example.dart');
         expect(example, startsWith('#!/usr/bin/env dart\n// @license'));
@@ -161,7 +161,7 @@ void main() {
         );
         expect(
           read('test/gg_example_repo_test.dart'),
-          contains("import 'package:flutter_test/flutter_test.dart';"),
+          contains("import 'package:flutter_test/flutter_test.dart' show"),
         );
         expect(
           read('example/gg_example_repo_example.dart'),

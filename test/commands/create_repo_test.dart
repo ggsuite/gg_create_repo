@@ -4,15 +4,24 @@
 // Use of this source code is governed by terms that can be
 // found in the LICENSE file in the root of this package.
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/command_runner.dart';
 import 'package:gg_console_colors/gg_console_colors.dart';
 import 'package:gg_create_repo/gg_create_repo.dart';
+import 'package:gg_create_repo/src/github.dart';
+import 'package:gg_create_repo/src/registry.dart';
+import 'package:gg_create_repo/src/tools.dart';
 import 'package:gg_interact/gg_interact.dart';
+import 'package:gg_process/gg_process.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
+
+import '../helpers/git_identity.dart';
 
 /// Answers every confirmation with [yes].
 class _Prompts extends GgPrompts {
@@ -48,6 +57,76 @@ class _TicketHost extends StandaloneHost {
   String? afterCreateDescription(RepoSpec spec) => 'add it to the ticket t';
 }
 
+// .............................................................................
+/// Runs git for real and answers gh for an admin of ggsuite; package
+/// managers need the network, so they only succeed.
+class _Tools extends GgProcessWrapper {
+  @override
+  Future<ProcessResult> run(
+    String executable,
+    List<String> arguments, {
+    String? workingDirectory,
+    Map<String, String>? environment,
+    bool includeParentEnvironment = true,
+    bool runInShell = false,
+    Encoding? stdoutEncoding,
+    Encoding? stderrEncoding,
+  }) async {
+    if (executable == 'git') {
+      return Process.run(
+        'git',
+        arguments,
+        workingDirectory: workingDirectory,
+        environment: gitIdentity,
+        stdoutEncoding: utf8,
+      );
+    }
+    final call = arguments.join(' ');
+    final out = switch (call) {
+      '--version' when executable == 'dart' => 'Dart SDK version: 3.9.2',
+      '--version' => 'version 2.60.0',
+      _ when call.contains('users/ggsuite') => 'HTTP/2 200\n\nOrganization',
+      _ when call.contains('memberships') => 'HTTP/2 200\n\nactive\tadmin',
+      _ => '',
+    };
+    return ProcessResult(0, 0, out, '');
+  }
+}
+
+// .............................................................................
+/// GitHub as a local bare repository; the push fails while [unreachable].
+class _LocalGitHub extends GitHub {
+  _LocalGitHub(this.bare) : super(processWrapper: _Tools());
+
+  final Directory bare;
+  var unreachable = true;
+  var _isPrivate = false;
+
+  @override
+  Future<RemoteRepo> remote(String slug) async {
+    if (!bare.existsSync()) return const RemoteRepo(RemoteState.missing);
+    final heads = Process.runSync('git', ['-C', bare.path, 'branch']);
+    final empty = '${heads.stdout}'.trim().isEmpty;
+    return RemoteRepo(
+      empty ? RemoteState.empty : RemoteState.filled,
+      isPrivate: _isPrivate,
+    );
+  }
+
+  @override
+  Future<void> create(RepoSpec spec) async {
+    _isPrivate = spec.isPrivate;
+    Process.runSync('git', ['init', '--bare', '-b', 'main', bare.path]);
+  }
+
+  @override
+  Future<String> cloneUrl(String slug) async =>
+      unreachable ? p.join(bare.path, 'missing') : bare.path;
+
+  @override
+  Future<void> applyMergeSettings(String slug) async {}
+}
+
 void main() {
   late Directory root;
   late List<String> messages;
@@ -70,7 +149,7 @@ void main() {
     List<Finding> findings = const [],
   }) {
     when(
-      () => collector.collect(any(), any()),
+      () => collector.collect(any(), any(), earlier: any(named: 'earlier')),
     ).thenAnswer((_) async => (spec: spec ?? RepoSpec.example(), asked: asked));
     when(() => preflight.run(any(), any(), resumes: any(named: 'resumes')))
         .thenAnswer((_) async => findings);
@@ -135,7 +214,13 @@ void main() {
   );
 
   RepoOptions collectedOptions() =>
-      verify(() => collector.collect(captureAny(), any())).captured.single
+      verify(
+            () => collector.collect(
+              captureAny(),
+              any(),
+              earlier: any(named: 'earlier'),
+            ),
+          ).captured.single
           as RepoOptions;
 
   Matcher throwsMentioning(List<String> parts) => throwsA(
@@ -211,13 +296,55 @@ void main() {
 
     // #########################################################################
     group('with an earlier run in the folder', () {
-      void earlierRun(RepoSpec spec) {
+      void earlierRun(RepoSpec spec, {Set<CreateStep>? done}) {
         Directory(target()).createSync();
         CreateRepoState(
           spec: spec,
-          done: {CreateStep.scaffold},
+          done: done ?? {CreateStep.scaffold},
         ).save(Directory(target()));
       }
+
+      test('hands the collector the earlier run of a folder', () async {
+        earlierRun(RepoSpec.example(description: 'x' * 70));
+        await run([]);
+
+        final find =
+            verify(
+                  () => collector.collect(
+                    any(),
+                    any(),
+                    earlier: captureAny(named: 'earlier'),
+                  ),
+                ).captured.single
+                as RepoSpec? Function(RepoSpec);
+        expect(find(RepoSpec.example())?.description, 'x' * 70);
+        expect(find(RepoSpec.example(name: 'gg_other')), isNull);
+      });
+
+      test('refuses new variables once the DNA is added', () async {
+        earlierRun(
+          RepoSpec.example(vars: {'dnaA': '1'}),
+          done: {CreateStep.scaffold, CreateStep.dna},
+        );
+        answer(spec: RepoSpec.example(vars: {'dnaA': '1', 'dnaB': '2'}));
+
+        await expectLater(
+          run([]),
+          throwsMentioning(['without dnaB', 'dna/_vars.json']),
+        );
+        expectNothingCreated();
+      });
+
+      test('keeps the variables of the DNA added already', () async {
+        earlierRun(
+          RepoSpec.example(vars: {'dnaA': '1'}),
+          done: {CreateStep.scaffold, CreateStep.dna},
+        );
+        answer(spec: RepoSpec.example(vars: {'dnaA': '1'}));
+
+        await run([]);
+        expect(created().state.spec.vars, {'dnaA': '1'});
+      });
 
       test('continues it and takes the variables given now', () async {
         earlierRun(RepoSpec.example(vars: {'a': '1', 'b': '2'}));
@@ -340,6 +467,71 @@ void main() {
         await run([]);
         created();
       });
+    });
+
+    // #########################################################################
+    test('continues a failed run headless with fewer options', () async {
+      final gitHub = _LocalGitHub(Directory(p.join(root.path, 'remote.git')));
+      final tools = Tools(processWrapper: _Tools());
+      final registry = Registry(
+        client: MockClient((_) async => http.Response('', 404)),
+      );
+      Future<void> create(List<String> args) =>
+          (CommandRunner<dynamic>('test', 'test')..addCommand(
+                CreateRepo(
+                  ggLog: (m) => messages.add(rmConsoleColors(m)),
+                  collector: SpecCollector(
+                    ggLog: messages.add,
+                    hasTerminal: () => false,
+                    gitHub: gitHub,
+                    registry: registry,
+                  ),
+                  preflight: Preflight(
+                    tools: tools,
+                    gitHub: gitHub,
+                    registry: registry,
+                  ),
+                  creator: RepoCreator(
+                    ggLog: messages.add,
+                    tools: tools,
+                    gitHub: gitHub,
+                    runDna: (_) async {},
+                    runChecks: (dir, ggLog) async {},
+                    delay: (_) async {},
+                  ),
+                ),
+              ))
+              .run(['create-repo', '-o', root.path, ...args]);
+      const identity = ['-n', 'gg_resumed', '-l', 'dart', '-g', 'ggsuite'];
+
+      await expectLater(
+        create([
+          ...identity,
+          '-d',
+          'A repository created in two runs: the first one fails at the push.',
+          ...['--private', '--cli', '--without-dna'],
+        ]),
+        throwsA(isA<Exception>()),
+      );
+      final dir = Directory(target('gg_resumed'));
+      expect(CreateRepoState.load(dir)?.done, contains(CreateStep.remote));
+
+      gitHub.unreachable = false;
+      await create(identity);
+
+      expect(CreateRepoState.fileIn(dir).existsSync(), isFalse);
+      expect(messages.join('\n'), contains('Continues the earlier run'));
+      final pubspec = File(p.join(dir.path, 'pubspec.yaml')).readAsStringSync();
+      expect(pubspec, contains('publish_to: none'));
+      expect(pubspec, contains('executables:'));
+      final pushed = Process.runSync('git', [
+        '-C',
+        gitHub.bare.path,
+        'log',
+        '--format=%s',
+        'main',
+      ]);
+      expect('${pushed.stdout}', contains('Initial version'));
     });
 
     // #########################################################################

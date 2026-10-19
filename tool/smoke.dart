@@ -9,10 +9,9 @@ import 'dart:io';
 import 'package:gg_create_repo/gg_create_repo.dart';
 import 'package:gg_create_repo/src/github.dart';
 
-/// Creates a real repository end to end — skeleton, `pub add`/`pnpm add`,
-/// DNA and gg checks — with a local bare repository instead of GitHub.
-///
-/// `dart run tool/smoke.dart <folder> <name> <dart|ts> [<dna,...>|-] [--cli]`
+/// Creates a real repository end to end with a local bare repository as
+/// GitHub. Usage: `dart run tool/smoke.dart folder name dart|ts`
+/// `[dna,...|-] [--cli]`
 Future<void> main(List<String> args) async {
   final root = Directory(args[0])..createSync(recursive: true);
   final layers = args.length > 3 && args[3] != '-'

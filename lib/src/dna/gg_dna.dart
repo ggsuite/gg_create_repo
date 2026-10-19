@@ -132,3 +132,15 @@ class GgDna extends Command<void> {
   @override
   String get description => 'Manage the DNA of a repo';
 }
+
+/// Runs one `gg dna` command — `init`, `add` or `build` — with its args;
+/// the seam that lets tests skip the package managers and the network.
+typedef RunDna = Future<void> Function(List<String> args);
+
+/// The `gg dna` runner outside of tests: helix' own commands with the
+/// prompts of the gg suite, what `gg dna` itself runs.
+RunDna helixDnaRunner(GgLog ggLog) {
+  final runner = CommandRunner<dynamic>('gg', 'gg')
+    ..addCommand(GgDna(ggLog: ggLog));
+  return (args) => runner.run(['dna', ...args]);
+}

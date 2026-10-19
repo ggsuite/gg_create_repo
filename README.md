@@ -7,7 +7,7 @@ pushed `main` that passes the gg checks.
 
 ```bash
 gg do create repo                 # asks for everything that is missing
-gg do create repo -i              # asks for everything
+gg do create repo -i              # also asks what has a default
 gg do create repo -n gg_foo -l dart -g ggsuite -d "…" --dna dna_ggsuite
 ```
 
@@ -33,7 +33,7 @@ gg_create_repo -n my-lib -l ts -g tssuite -d "…" --dna @tssuite/dna-tssuite
 
 | Option                | Meaning                                                   |
 | --------------------- | --------------------------------------------------------- |
-| `-n`, `--name`        | Name of repository, folder and package                    |
+| `-n`, `--name`        | Name of repository, folder and package (Dart: at most 64) |
 | `-l`, `--language`    | `dart` or `ts`                                            |
 | `-g`, `--org`         | GitHub organization or user — free text or from the menu  |
 | `-d`, `--description` | One line; Dart needs 60 to 180 characters (pana)          |
@@ -44,10 +44,10 @@ gg_create_repo -n my-lib -l ts -g tssuite -d "…" --dna @tssuite/dna-tssuite
 | `--[no-]flutter`      | Dart: a Flutter package (no CLI)                          |
 | `--dna <layer>`       | A DNA layer, package name or git URL; repeat for more     |
 | `--without-dna`       | No DNA at all                                             |
-| `--var key=value`     | A DNA variable; repeat for more                           |
+| `--var dnaKey=value`  | A DNA variable, like `dnaCompany=Acme`; repeat for more   |
 | `-o`, `--output`      | Outside of a workspace: the folder to create it in        |
 | `--[no-]add`          | gg, inside a ticket: add the new repository (default on)  |
-| `-i`, `--interactive` | Ask every question                                        |
+| `-i`, `--interactive` | Also ask what has a default (visibility, CLI, …)          |
 | `-y`, `--yes`         | Do not ask before creating                                |
 | `--dry-run`           | Only show the plan and the checks                         |
 
@@ -55,7 +55,9 @@ Without a terminal every missing value is an error naming the option to
 pass. The one exception: the DNA named after the org (`dna_<org>`,
 `@<scope>/dna-<org>`) is taken without asking when the workspace itself
 has it. Required DNA variables (`mustOverride`) are asked for up front, or
-must be given with `--var` when running headless.
+must be given with `--var` when running headless — as far as the workspace
+has a local copy of the layer. Outside of a workspace, helix asks for them
+while it installs the layer.
 
 ## What it does
 
@@ -81,5 +83,6 @@ must be given with `--var` when running headless.
    auto-merge and the branch rules. Without that script only the merge
    settings are applied, and `main` stays unprotected.
 
-A run that stops half way continues where it stopped: run the same command
-again. Nothing is ever deleted.
+A run that stops half way continues where it stopped: run the command again
+with the same name, language and org; everything else is taken from the
+earlier run. Nothing is ever deleted.

@@ -4,6 +4,9 @@
 // Use of this source code is governed by terms that can be
 // found in the LICENSE file in the root of this package.
 
+import 'repo_language.dart';
+import 'repo_spec.dart';
+
 /// The values given on the command line; `null` means not given.
 class RepoOptions {
   /// Constructor
@@ -43,6 +46,35 @@ class RepoOptions {
     withoutDna: withoutDna ?? false,
     interactive: interactive ?? false,
   );
+
+  // ...........................................................................
+  /// These options with the values of [earlier] where none was given: a
+  /// continued run asks nothing the earlier one answered.
+  RepoOptions withDefaultsOf(RepoSpec earlier) {
+    final ts = earlier.language == RepoLanguage.typescript;
+    final layers = dnaLayers.isEmpty && !withoutDna
+        ? earlier.dnaLayers
+        : dnaLayers;
+    return RepoOptions(
+      name: name ?? earlier.name,
+      language: language,
+      org: org ?? earlier.org,
+      description: description ?? earlier.description,
+      npmScope: npmScope ?? (ts ? earlier.npmScope : null),
+      isPrivate: isPrivate ?? earlier.isPrivate,
+      cli: cli ?? earlier.cli,
+      example: example ?? earlier.example,
+      flutter: flutter ?? earlier.flutter,
+      dnaLayers: layers,
+      withoutDna: withoutDna || layers.isEmpty,
+      vars: [
+        for (final MapEntry(:key, :value) in earlier.vars.entries)
+          '$key=$value',
+        ...vars,
+      ],
+      interactive: interactive,
+    );
+  }
 
   /// `--name`
   final String? name;

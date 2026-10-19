@@ -290,7 +290,7 @@ void main() {
             isA<Exception>().having(
               (e) => '$e',
               'message',
-              allOf(contains('stdin is not a terminal'), contains('--name')),
+              allOf(contains('not a terminal'), contains('--name')),
             ),
           ),
         );
@@ -471,10 +471,84 @@ void main() {
             org: 'ggsuite',
             description: description,
             withoutDna: true,
-            vars: ['a=1', 'b=x=y'],
+            vars: ['dnaA=1', 'dnaB=x=y', ' dnaC = z '],
           ),
         );
-        expect(result.vars, {'a': '1', 'b': 'x=y'});
+        expect(result.vars, {'dnaA': '1', 'dnaB': 'x=y', 'dnaC': 'z'});
+      });
+
+      group('with an earlier run', () {
+        final earlier = RepoSpec.example(
+          description: 'x' * 70,
+          isPrivate: true,
+          cli: true,
+          example: false,
+          dnaLayers: ['dna_other'],
+          vars: {'dnaA': '1'},
+        );
+
+        test('takes its values instead of asking again', () async {
+          final drafts = <RepoSpec>[];
+          final prompts = _ScriptedPrompts([]);
+
+          final (:spec, :asked) = await collector(prompts, terminal: false)
+              .collect(
+                const RepoOptions(
+                  name: 'gg_example_repo',
+                  language: 'dart',
+                  org: 'ggsuite',
+                  vars: ['dnaB=2'],
+                  interactive: true,
+                ),
+                _Host(),
+                earlier: (draft) {
+                  drafts.add(draft);
+                  return earlier;
+                },
+              );
+
+          expect(drafts.single.slug, 'ggsuite/gg_example_repo');
+          expect(spec.description, 'x' * 70);
+          expect(spec.isPrivate, isTrue);
+          expect(spec.cli, isTrue);
+          expect(spec.example, isFalse);
+          expect(spec.dnaLayers, ['dna_other']);
+          expect(spec.vars, {'dnaA': '1', 'dnaB': '2'});
+          expect(asked, isFalse);
+        });
+
+        test('keeps what is given now', () async {
+          final result = await collector(_ScriptedPrompts([])).collect(
+            RepoOptions.example(
+              description: 'y' * 70,
+              dnaLayers: [],
+              withoutDna: true,
+            ).withDefaultsOf(earlier),
+            _Host(),
+          );
+          expect(result.spec.description, 'y' * 70);
+          expect(result.spec.dnaLayers, isEmpty);
+        });
+
+        test('without DNA stays without DNA', () async {
+          final result = await collector(_ScriptedPrompts([]), terminal: false)
+              .collect(
+                const RepoOptions(
+                  name: 'my-lib',
+                  language: 'ts',
+                  org: 'ggsuite',
+                ),
+                _Host(),
+                earlier: (_) => RepoSpec.example(
+                  name: 'my-lib',
+                  language: RepoLanguage.typescript,
+                  npmScope: 'acme',
+                  dnaLayers: [],
+                ),
+              );
+          expect(result.spec.dnaLayers, isEmpty);
+          expect(result.spec.npmScope, 'acme');
+        });
       });
 
       group('the DNA', () {
@@ -500,6 +574,19 @@ void main() {
             terminal: false,
           );
           expect(result.dnaLayers, ['dna_ggsuite']);
+        });
+
+        test('is the copy of the host when headless, also a URL', () async {
+          final result = await spec(
+            noDna(),
+            host: _Host(
+              candidates: [
+                DnaCandidate.example(ref: 'git@github.com:ggsuite/x.git'),
+              ],
+            ),
+            terminal: false,
+          );
+          expect(result.dnaLayers, ['git@github.com:ggsuite/x.git']);
         });
 
         test('is not taken from the registry alone when headless', () async {

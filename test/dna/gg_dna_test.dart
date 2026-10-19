@@ -123,6 +123,12 @@ void main() {
     });
   });
 
+  group('helixDnaRunner', () {
+    test('runs the helix commands under gg dna', () async {
+      await expectLater(helixDnaRunner((_) {})(['--help']), completes);
+    });
+  });
+
   group('helixSelectPrompt', () {
     tearDown(() => GgPrompts.current = null);
 

@@ -8,22 +8,18 @@
 @Timeout(Duration(minutes: 10))
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:gg_create_repo/gg_create_repo.dart';
 import 'package:gg_create_repo/src/scaffold/common_files.dart';
 import 'package:gg_create_repo/src/scaffold/dart_scaffold.dart';
+import 'package:gg_create_repo/src/validation.dart';
 import 'package:gg_one_commit/gg_one_commit.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
-/// The identity of the commits the test makes; CI has none of its own.
-const _gitIdentity = {
-  'GIT_AUTHOR_NAME': 'Test',
-  'GIT_AUTHOR_EMAIL': 'test@example.com',
-  'GIT_COMMITTER_NAME': 'Test',
-  'GIT_COMMITTER_EMAIL': 'test@example.com',
-};
+import '../helpers/git_identity.dart';
 
 /// Writes the real Dart skeleton of [spec] and runs gg's commit checks on
 /// it: analyze, format and the tests with 100 % coverage. The packages
@@ -48,13 +44,18 @@ Future<void> expectGreen(RepoSpec spec) async {
       exe,
       args,
       workingDirectory: dir.path,
-      environment: _gitIdentity,
+      environment: gitIdentity,
       runInShell: Platform.isWindows,
     );
     expect(result.exitCode, 0, reason: '$exe $args\n${result.stderr}');
   }
 
   await run('dart', ['pub', 'get', '--offline']);
+  expect(
+    resolvedPackages(dir).difference({spec.name}),
+    everyElement(isIn(Validation.skeletonDependencies)),
+    reason: 'A package of this name could not depend on the skeleton.',
+  );
   await run('dart', ['format', '.']);
   await run('git', ['init', '--initial-branch=main']);
   await run('git', ['add', '--all']);
@@ -65,6 +66,13 @@ Future<void> expectGreen(RepoSpec spec) async {
       .exec(directory: dir, ggLog: messages.add);
 }
 
+/// The packages pub resolved for the package in [dir].
+Set<String> resolvedPackages(Directory dir) {
+  final config = File(p.join(dir.path, '.dart_tool', 'package_config.json'));
+  final packages = (jsonDecode(config.readAsStringSync()) as Map)['packages'];
+  return {for (final package in packages as List) '${package['name']}'};
+}
+
 void main() {
   const description =
       'A package whose description is as long as pub.dev allows, mentions '
@@ -72,20 +80,21 @@ void main() {
       'pass the gg checks.';
 
   group('The Dart skeleton passes the gg commit checks', () {
-    test('for a library with a long name and description', () async {
+    // The longest name and description the validation lets through.
+    final longestName = 'gg_${'a_long_name_' * 5}'.padRight(64, 'x');
+
+    test('for a library with the longest name and description', () async {
       expect(description.length, lessThanOrEqualTo(180));
+      expect(longestName.length, 64);
       await expectGreen(
-        RepoSpec.example(
-          name: 'gg_a_package_with_a_rather_long_name_for_tests',
-          description: description,
-        ),
+        RepoSpec.example(name: longestName, description: description),
       );
     });
 
     test('for a command line package without an example', () async {
       await expectGreen(
         RepoSpec.example(
-          name: 'gg_a_command_line_package_with_a_long_name',
+          name: longestName,
           description: description,
           cli: true,
           example: false,

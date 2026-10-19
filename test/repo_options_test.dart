@@ -55,5 +55,56 @@ void main() {
       expect(options.withoutDna, isTrue);
       expect(options.interactive, isTrue);
     });
+
+    group('withDefaultsOf()', () {
+      final earlier = RepoSpec.example(
+        language: RepoLanguage.typescript,
+        name: 'my-lib',
+        npmScope: 'acme',
+        isPrivate: true,
+        dnaLayers: ['@acme/dna-acme'],
+        vars: {'dnaA': '1'},
+      );
+
+      test('fills what was not given from the earlier run', () {
+        final options = const RepoOptions(
+          vars: ['dnaB=2'],
+          interactive: true,
+        ).withDefaultsOf(earlier);
+        expect(options.name, 'my-lib');
+        expect(options.language, isNull);
+        expect(options.org, 'ggsuite');
+        expect(options.description, earlier.description);
+        expect(options.npmScope, 'acme');
+        expect(options.isPrivate, isTrue);
+        expect(
+          [options.cli, options.example, options.flutter],
+          [false, true, false],
+        );
+        expect(options.dnaLayers, ['@acme/dna-acme']);
+        expect(options.withoutDna, isFalse);
+        expect(options.vars, ['dnaA=1', 'dnaB=2']);
+        expect(options.interactive, isTrue);
+      });
+
+      test('keeps what was given', () {
+        final options = RepoOptions.example(
+          description: 'given',
+          dnaLayers: [],
+          withoutDna: true,
+        ).withDefaultsOf(earlier);
+        expect(options.description, 'given');
+        expect(options.dnaLayers, isEmpty);
+        expect(options.withoutDna, isTrue);
+      });
+
+      test('has no scope for Dart and no DNA when there was none', () {
+        final options = const RepoOptions().withDefaultsOf(
+          RepoSpec.example(dnaLayers: []),
+        );
+        expect(options.npmScope, isNull);
+        expect(options.withoutDna, isTrue);
+      });
+    });
   });
 }

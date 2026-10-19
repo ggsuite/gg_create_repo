@@ -29,6 +29,7 @@ abstract class Scaffold {
   /// Writes every file of the skeleton into [directory].
   void write(Directory directory, RepoSpec spec);
 
+  // ...........................................................................
   /// Adds the dependencies at their latest versions.
   Future<void> install(Directory directory, RepoSpec spec, Tools tools);
 

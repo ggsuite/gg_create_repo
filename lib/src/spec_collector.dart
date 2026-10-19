@@ -52,8 +52,14 @@ class SpecCollector {
   );
 
   // ...........................................................................
-  /// The spec for [options] and whether a question was asked.
-  Future<CollectedSpec> collect(RepoOptions options, RepoHost host) async {
+  /// The spec for [options] and whether a question was asked. [earlier]
+  /// finds the spec of an earlier run for language, org and name; its
+  /// values stand in for every option not given.
+  Future<CollectedSpec> collect(
+    RepoOptions options,
+    RepoHost host, {
+    RepoSpec? Function(RepoSpec draft)? earlier,
+  }) async {
     final run = _Run(this, options);
     final language = options.language != null
         ? _parseLanguage(options.language!)
@@ -70,6 +76,12 @@ class SpecCollector {
       option: '--name',
       validate: (v) => _validation.name(v, language),
     );
+    final previous = earlier?.call(
+      RepoSpec(name: name, language: language, org: org, description: ''),
+    );
+    if (previous != null) {
+      options = run.options = options.withDefaultsOf(previous);
+    }
     final description = await run.text(
       options.description,
       'Description',
@@ -210,9 +222,8 @@ class SpecCollector {
 
     final suggested = suggestedDna(spec);
     final fromHost = host.dnaCandidates(spec);
-    if (!_hasTerminal() && fromHost.any((c) => c.ref == suggested)) {
-      return [suggested];
-    }
+    final offered = fromHost.where((c) => c.label == suggested).firstOrNull;
+    if (!_hasTerminal() && offered != null) return [offered.ref];
     run.ensureTerminal('Which DNA?', '--dna <layer> or --without-dna');
 
     final candidates = await _dnaCandidates(spec, fromHost, suggested);
@@ -243,18 +254,22 @@ class SpecCollector {
 
   // ...........................................................................
   /// The suggested layer when the host or the registry has it, then the
-  /// other layers of the host.
+  /// other layers of the host; the host's copy may be a git URL.
   Future<List<DnaCandidate>> _dnaCandidates(
     RepoSpec spec,
     List<DnaCandidate> fromHost,
     String suggested,
   ) async {
+    final own = fromHost.where((c) => c.label == suggested).firstOrNull;
     final exists =
-        fromHost.any((c) => c.ref == suggested) ||
-        await _registry.has(suggested, spec.language) == true;
+        own != null || await _registry.has(suggested, spec.language) == true;
     return [
-      if (exists) DnaCandidate(label: '$suggested (suggested)', ref: suggested),
-      ...fromHost.where((c) => c.ref != suggested),
+      if (exists)
+        DnaCandidate(
+          label: '$suggested (suggested)',
+          ref: own?.ref ?? suggested,
+        ),
+      ...fromHost.where((c) => c.label != suggested),
     ];
   }
 
@@ -266,12 +281,14 @@ class SpecCollector {
     RepoHost host,
     List<String> layers,
   ) async {
-    final vars = <String, String>{
-      for (final pair in run.options.vars)
-        run.valid(pair, _validation.variable).split('=').first: pair.substring(
-          pair.indexOf('=') + 1,
-        ),
-    };
+    final vars = <String, String>{};
+    for (final pair in run.options.vars) {
+      final valid = run.valid(pair, _validation.variable);
+      final index = valid.indexOf('=');
+      vars[valid.substring(0, index).trim()] = valid
+          .substring(index + 1)
+          .trim();
+    }
     final missing = _dnaVariables
         .missing(layers: layers, given: vars, host: host)
         .missing;
@@ -292,7 +309,7 @@ class _Run {
   _Run(this.collector, this.options);
 
   final SpecCollector collector;
-  final RepoOptions options;
+  RepoOptions options;
   var asked = false;
 
   // ...........................................................................

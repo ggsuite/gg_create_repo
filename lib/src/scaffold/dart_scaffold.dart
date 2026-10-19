@@ -133,9 +133,11 @@ class DartScaffold extends Scaffold {
   }
 
   // ...........................................................................
-  String _testImport(RepoSpec spec) => spec.flutter
-      ? "import 'package:flutter_test/flutter_test.dart';"
-      : "import 'package:test/test.dart';";
+  /// Only what the tests use: no name of the package can clash with it.
+  String _testImport(RepoSpec spec, {String extra = ''}) {
+    final library = spec.flutter ? 'flutter_test/flutter_test' : 'test/test';
+    return "import 'package:$library.dart' show ${extra}expect, group, test;";
+  }
 
   // ...........................................................................
   String _analysisOptions(RepoSpec spec) =>
@@ -200,6 +202,7 @@ void main() {
   // ...........................................................................
   String _cliRoot(RepoSpec spec) {
     final c = Scaffold.pascalCase(spec.name);
+    final doc = docComment('The root command of ${spec.name}.');
     return '''
 ${CommonFiles.fileHeader(spec)}
 import 'package:args/command_runner.dart';
@@ -207,12 +210,14 @@ import 'package:gg_log/gg_log.dart';
 
 import 'commands/my_command.dart';
 
-/// The root command of ${spec.name}.
-class $c extends Command<dynamic> {
+${doc}class $c extends Command<dynamic> {
   /// Constructor
   $c({required this.ggLog}) {
     addSubcommand(MyCommand(ggLog: ggLog));
   }
+
+  /// A command that logs nothing; tests pass what they care about.
+  factory $c.example({GgLog? ggLog}) => $c(ggLog: ggLog ?? (_) {});
 
   // ...........................................................................
   @override
@@ -235,12 +240,12 @@ class $c extends Command<dynamic> {
     return '''
 ${CommonFiles.fileHeader(spec)}
 import 'package:${spec.name}/${spec.name}.dart';
-${_testImport(spec)}
+${_testImport(spec, extra: 'contains, ')}
 
 void main() {
   group('$c', () {
     test('offers my-command', () {
-      final command = $c(ggLog: (_) {});
+      final command = $c.example();
       expect(command.name, '${spec.name}');
       expect(command.description, contains('${spec.name}'));
       expect(command.subcommands.keys, ['my-command']);
@@ -269,6 +274,10 @@ class MyCommand extends Command<dynamic> {
     );
   }
 
+  /// A command that logs nothing; tests pass what they care about.
+  factory MyCommand.example({GgLog? ggLog}) =>
+      MyCommand(ggLog: ggLog ?? (_) {});
+
   // ...........................................................................
   @override
   final name = 'my-command';
@@ -288,7 +297,7 @@ class MyCommand extends Command<dynamic> {
   String _myCommandTest(RepoSpec spec) =>
       '''
 ${CommonFiles.fileHeader(spec)}
-import 'package:args/command_runner.dart';
+import 'package:args/command_runner.dart' show CommandRunner;
 import 'package:${spec.name}/${spec.name}.dart';
 ${_testImport(spec)}
 
@@ -297,7 +306,7 @@ void main() {
     test('logs the input', () async {
       final messages = <String>[];
       final runner = CommandRunner<dynamic>('test', 'test')
-        ..addCommand(MyCommand(ggLog: messages.add));
+        ..addCommand(MyCommand.example(ggLog: messages.add));
 
       await runner.run(['my-command', '--input', 'hello']);
       expect(messages, ['hello']);
@@ -309,16 +318,16 @@ void main() {
   // ...........................................................................
   String _bin(RepoSpec spec) {
     final c = Scaffold.pascalCase(spec.name);
+    final doc = docComment('Runs ${spec.name} with [args].');
     return '''
 #!/usr/bin/env dart
 ${CommonFiles.fileHeader(spec)}
-import 'package:gg_args/gg_args.dart';
-import 'package:gg_log/gg_log.dart';
+import 'package:gg_args/gg_args.dart' show GgCommandRunner;
+import 'package:gg_log/gg_log.dart' show GgLog;
 import 'package:${spec.name}/${spec.name}.dart';
 
 // .............................................................................
-/// Runs ${spec.name} with [args].
-Future<void> run({required List<String> args, required GgLog ggLog}) =>
+${doc}Future<void> run({required List<String> args, required GgLog ggLog}) =>
     GgCommandRunner(ggLog: ggLog, command: $c(ggLog: ggLog)).run(args: args);
 
 // .............................................................................
@@ -355,7 +364,7 @@ void main() {
         : "${spec.flutter ? '  // ignore: avoid_print\n' : ''}"
               "  print(const $c().greet('World'));\n";
     final imports = spec.cli
-        ? "import 'package:args/command_runner.dart';\n"
+        ? "import 'package:args/command_runner.dart' show CommandRunner;\n"
         : "import 'package:${spec.name}/${spec.name}.dart';\n";
     return '#!/usr/bin/env dart\n'
         '${CommonFiles.fileHeader(spec)}\n'

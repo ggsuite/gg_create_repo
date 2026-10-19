@@ -15,6 +15,10 @@ class CommonFiles {
   /// Constructor
   const CommonFiles({this._now = DateTime.now});
 
+  /// The files at a fixed [now]; tests pass what they care about.
+  factory CommonFiles.example({DateTime Function()? now}) =>
+      CommonFiles(now: now ?? () => DateTime(2026));
+
   // ...........................................................................
   /// Writes LICENSE, README.md, CHANGELOG.md and .gitattributes.
   void write(Directory directory, RepoSpec spec) {

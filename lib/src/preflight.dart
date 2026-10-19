@@ -9,6 +9,7 @@ import 'dart:io';
 import 'package:mocktail/mocktail.dart';
 
 import 'dna/dna_variables.dart';
+import 'dna/git_url.dart';
 import 'github.dart';
 import 'registry.dart';
 import 'repo_host.dart';
@@ -77,9 +78,11 @@ class Preflight {
     void info(String m) => findings.add(Finding(FindingLevel.info, m));
 
     await _checkGit(error);
+    final ghProblem = await _gitHub.authProblem();
+    if (ghProblem != null) error(ghProblem);
     await _checkTools(spec, error, warn);
     await _checkTarget(host.targetDir(spec), resumes, error, warn, info);
-    await _checkGitHub(spec, resumes, error, info);
+    if (ghProblem == null) await _checkGitHub(spec, resumes, error, info);
     if (!spec.isPrivate) await _checkRegistry(spec, error, warn);
     await _checkDna(spec, host, error, warn);
     for (final problem in await host.check(spec, resumes: resumes)) {
@@ -123,9 +126,6 @@ class Preflight {
     void Function(String) error,
     void Function(String) warn,
   ) async {
-    final problem = await _gitHub.authProblem();
-    if (problem != null) error(problem);
-
     if (spec.language == RepoLanguage.typescript) {
       if (await _tools.version('node') == null) error('node is not installed.');
       final pnpm = await _tools.majorVersion('pnpm');
@@ -249,8 +249,8 @@ class Preflight {
           await _tools.run('git', [
             'ls-remote',
             '--heads',
-            layer,
-          ], directory: Directory.systemTemp);
+            gitReadableUrl(layer),
+          ], directory: Directory.current);
         } on Exception {
           error('The DNA layer $layer cannot be read with git.');
         }
@@ -271,9 +271,14 @@ class Preflight {
       if (exists == null) warn('$registry could not be asked for $layer.');
     }
 
-    final unresolved = _dnaVariables
-        .missing(layers: spec.dnaLayers, given: spec.vars, host: host)
-        .unresolved;
+    final (:unresolved, :broken, missing: _) = _dnaVariables.missing(
+      layers: spec.dnaLayers,
+      given: spec.vars,
+      host: host,
+    );
+    broken.forEach(
+      (layer, reason) => error('The DNA config of $layer is broken: $reason'),
+    );
     for (final layer in unresolved) {
       warn(
         'The required variables of $layer are only known once it is '
@@ -281,17 +286,6 @@ class Preflight {
       );
     }
   }
-
-  // ...........................................................................
-  /// Whether [layer] is a git URL, by the rules of helix' `AddTarget`.
-  static bool isGitUrl(String layer) =>
-      layer.startsWith('https://') ||
-      layer.startsWith('http://') ||
-      layer.startsWith('git://') ||
-      layer.startsWith('git+') ||
-      layer.startsWith('ssh://') ||
-      layer.endsWith('.git') ||
-      RegExp(r'^[^@/\s]+@[^:/\s]+:').hasMatch(layer);
 }
 
 /// Mock for [Preflight].

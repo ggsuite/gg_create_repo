@@ -77,11 +77,15 @@ class CreateRepo extends Command<dynamic> {
     final args = argResults!;
     final host = _host(args);
     final options = _optionsFrom();
-    final collected = await _collector.collect(options, host);
+    final collected = await _collector.collect(
+      options,
+      host,
+      earlier: (draft) => CreateRepoState.load(host.targetDir(draft))?.spec,
+    );
     var spec = collected.spec;
     final directory = host.targetDir(spec);
     final earlier = CreateRepoState.load(directory);
-    if (earlier != null) spec = _continued(earlier.spec, spec, options);
+    if (earlier != null) spec = _continued(earlier, spec, options);
 
     _logPlan(spec, directory, host);
     final findings = await _preflight.run(spec, host, resumes: earlier != null);
@@ -133,7 +137,8 @@ class CreateRepo extends Command<dynamic> {
   // ...........................................................................
   /// The spec of the earlier run, with the variables given now. Options
   /// that contradict it are an error: the run must stay one repository.
-  RepoSpec _continued(RepoSpec earlier, RepoSpec now, RepoOptions given) {
+  RepoSpec _continued(CreateRepoState state, RepoSpec now, RepoOptions given) {
+    final earlier = state.spec;
     if (earlier.slug != now.slug) {
       throw Exception(
         cError(
@@ -167,7 +172,21 @@ class CreateRepo extends Command<dynamic> {
             cAction('Run it again with its values.'),
       );
     }
-    return earlier.copyWith(vars: {...earlier.vars, ...now.vars});
+    final vars = {...earlier.vars, ...now.vars};
+    final newVars = [
+      for (final MapEntry(:key, :value) in vars.entries)
+        if (earlier.vars[key] != value) key,
+    ];
+    if (newVars.isNotEmpty && state.done.contains(CreateStep.dna)) {
+      throw Exception(
+        cError('The DNA was added already, without ${newVars.join(', ')}. ') +
+            cAction(
+              'Set it in dna/_vars.json and run »gg dna build« once the '
+              'repository is created.',
+            ),
+      );
+    }
+    return earlier.copyWith(vars: vars);
   }
 
   // ...........................................................................
@@ -218,7 +237,9 @@ class CreateRepo extends Command<dynamic> {
         'interactive',
         abbr: 'i',
         negatable: false,
-        help: 'Ask every question, not only the missing ones.',
+        help:
+            'Also ask what has a default: visibility, CLI, example, '
+            'Flutter, npm scope and the org of the folder.',
       )
       ..addFlag(
         'yes',

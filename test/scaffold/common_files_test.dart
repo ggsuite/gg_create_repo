@@ -57,6 +57,15 @@ void main() {
         final license = const CommonFiles().license(RepoSpec.example());
         expect(license, contains('${DateTime.now().year} ggsuite'));
       });
+
+      test('example() writes at a fixed year', () {
+        expect(
+          CommonFiles.example().license(RepoSpec.example()),
+          contains('2026 ggsuite'),
+        );
+        final later = CommonFiles.example(now: () => DateTime(2030));
+        expect(later.license(RepoSpec.example()), contains('2030'));
+      });
     });
 
     group('fileHeader()', () {

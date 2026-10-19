@@ -51,10 +51,13 @@ void main() {
       );
   }
 
-  ({List<MissingDnaVariable> missing, List<String> unresolved}) missing(
-    List<String> layers, {
-    Map<String, String> given = const {},
-  }) => variables.missing(layers: layers, given: given, host: host);
+  ({
+    List<MissingDnaVariable> missing,
+    List<String> unresolved,
+    Map<String, String> broken,
+  })
+  missing(List<String> layers, {Map<String, String> given = const {}}) =>
+      variables.missing(layers: layers, given: given, host: host);
 
   setUp(() {
     root = Directory.systemTemp.createTempSync('dna_variables_');
@@ -142,7 +145,10 @@ void main() {
     test('lists a layer whose config cannot be read', () {
       Directory(p.join(root.path, 'dna_broken', 'dna'))
           .createSync(recursive: true);
-      expect(missing(['dna_broken']).unresolved, ['dna_broken']);
+      final result = missing(['dna_broken']);
+      expect(result.unresolved, isEmpty);
+      expect(result.broken.keys, ['dna_broken']);
+      expect(missing(['dna_broken', 'dna_broken']).broken, hasLength(1));
     });
 
     test('a layer without dna folder requires nothing', () {

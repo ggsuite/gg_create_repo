@@ -224,6 +224,20 @@ void main() {
         );
       });
 
+      test('throws when gh is missing', () async {
+        final missing = GitHub(
+          processWrapper: _FakeGh(
+            (_) => throw const ProcessException('gh', [], 'not found'),
+          ),
+        );
+        await expectLater(
+          missing.remote('o/r'),
+          throwsA(
+            isA<Exception>().having((e) => '$e', 'message', contains('found')),
+          ),
+        );
+      });
+
       test('is empty when the commits answer 409', () async {
         final remote = await gh(_http(200, 'true'), _http(409)).remote('o/r');
         expect(remote.state, RemoteState.empty);

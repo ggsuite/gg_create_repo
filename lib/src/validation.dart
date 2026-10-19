@@ -20,8 +20,9 @@ class Validation {
   /// The name of the repository, its folder and its package.
   String? name(String name, RepoLanguage language) {
     if (name.isEmpty) return 'The name must not be empty.';
-    if (name.length > 100) {
-      return 'The name must have at most 100 characters.';
+    final maxLength = language == RepoLanguage.dart ? 64 : 100;
+    if (name.length > maxLength) {
+      return 'The name must have at most $maxLength characters.';
     }
     if (_windowsDeviceNames.contains(name.split('.').first)) {
       return '»$name« is a reserved file name on Windows.';
@@ -71,11 +72,18 @@ class Validation {
             '».«, »-« and »_«.';
 
   // ...........................................................................
-  /// A `key=value` pair for a DNA variable.
+  /// A `key=value` pair for a DNA variable; helix names them like
+  /// `dnaProjectName`.
   String? variable(String pair) {
     final index = pair.indexOf('=');
-    if (index <= 0) {
-      return '»$pair« is no variable: use key=value.';
+    if (index <= 0) return '»$pair« is no variable: use key=value.';
+    final key = pair.substring(0, index).trim();
+    if (!_dnaVariable.hasMatch(key)) {
+      return '»$key« is no DNA variable: use dna and camel case, like '
+          'dnaProjectName.';
+    }
+    if (pair.substring(index + 1).trim().isEmpty) {
+      return 'The variable »$key« needs a value.';
     }
     return null;
   }
@@ -93,7 +101,7 @@ class Validation {
     if (_dartReservedWords.contains(name)) {
       return '»$name« is a reserved word in Dart.';
     }
-    if (_skeletonDependencies.contains(name)) {
+    if (skeletonDependencies.contains(name)) {
       return '»$name« is a dependency of the skeleton itself.';
     }
     final pascal = Scaffold.pascalCase(name);
@@ -115,12 +123,18 @@ class Validation {
     if (name == 'index') {
       return '»index« is taken by src/index.ts.';
     }
+    final pascal = Scaffold.pascalCase(name);
+    if (_tsGlobals.contains(pascal)) {
+      return 'The class »$pascal« of »$name« would hide the global '
+          'JavaScript or TypeScript type of the same name.';
+    }
     return null;
   }
 
   static final _dartIdentifier = RegExp(r'^[a-z][a-z0-9_]*$');
   static final _npmPart = RegExp(r'^[a-z0-9][a-z0-9._-]*$');
   static final _githubOwner = RegExp(r'^[A-Za-z0-9]+(-[A-Za-z0-9]+)*$');
+  static final _dnaVariable = RegExp(r'^dna[A-Z][a-zA-Z0-9]*$');
 
   static const _windowsDeviceNames = {
     'con', 'prn', 'aux', 'nul', //
@@ -128,14 +142,26 @@ class Validation {
     'lpt1', 'lpt2', 'lpt3', 'lpt4', 'lpt5', 'lpt6', 'lpt7', 'lpt8', 'lpt9',
   };
 
-  /// Packages the Dart skeleton depends on; pub cannot add a package to
-  /// itself.
-  static const _skeletonDependencies = {
-    'args', 'flutter', 'flutter_lints', 'flutter_test', 'gg_args', //
-    'gg_log', 'helix', 'lints', 'test',
+  /// What a Dart, CLI or Flutter skeleton resolves; nothing depends on itself.
+  static const skeletonDependencies = {
+    '_fe_analyzer_shared', 'analyzer', 'args', 'async', 'boolean_selector', //
+    'characters', 'cli_config', 'cli_util', 'clock', 'collection', 'colorize',
+    'convert', 'coverage', 'crypto', 'fake_async', 'ffi', 'file', 'flutter',
+    'flutter_lints', 'flutter_test', 'frontend_server_client', 'gg_args',
+    'gg_capture_print', 'gg_console_colors', 'gg_hash', 'gg_json', 'gg_log',
+    'gg_process', 'glob', 'helix', 'http_multi_server', 'http_parser', 'io',
+    'leak_tracker', 'leak_tracker_flutter_testing', 'leak_tracker_testing',
+    'lints', 'logging', 'matcher', 'material_color_utilities', 'meta', 'mime',
+    'mocktail', 'node_preamble', 'package_config', 'path', 'pool',
+    'pub_semver', 'recase', 'shelf', 'shelf_packages_handler', 'shelf_static',
+    'shelf_web_socket', 'sky_engine', 'source_map_stack_trace', 'source_maps',
+    'source_span', 'stack_trace', 'stream_channel', 'string_scanner',
+    'term_glyph', 'test', 'test_api', 'test_core', 'typed_data',
+    'vector_math', 'vm_service', 'watcher', 'web', 'web_socket',
+    'web_socket_channel', 'webkit_inspection_protocol', 'yaml',
   };
 
-  /// Classes of `dart:core` and of the skeleton a package class would hide.
+  /// Classes of `dart:core` and the skeleton; the rest is imported by `show`.
   static const _takenClassNames = {
     'BigInt', 'Comparable', 'Command', 'CommandRunner', 'DateTime', //
     'Deprecated', 'Duration', 'Enum', 'Error', 'Exception', 'Expando',
@@ -145,6 +171,17 @@ class Validation {
     'Runes', 'Set', 'Sink', 'StackTrace', 'Stopwatch', 'Stream', 'String',
     'StringBuffer', 'StringSink', 'Symbol', 'Type', 'Uri', 'UriData',
     'WeakReference',
+  };
+
+  static const _tsGlobals = {
+    'Array', 'ArrayBuffer', 'Awaited', 'BigInt', 'Boolean', 'Capitalize', //
+    'ConstructorParameters', 'DataView', 'Date', 'Error', 'Exclude',
+    'Extract', 'Function', 'InstanceType', 'Intl', 'Iterator', 'JSON',
+    'Lowercase', 'Map', 'Math', 'NoInfer', 'NonNullable', 'Number', 'Object',
+    'Omit', 'Parameters', 'Partial', 'Pick', 'Promise', 'Proxy', 'Readonly',
+    'Record', 'Reflect', 'RegExp', 'Required', 'ReturnType', 'Set', 'String',
+    'Symbol', 'ThisType', 'Uncapitalize', 'Uppercase', 'WeakMap', 'WeakRef',
+    'WeakSet',
   };
 
   static const _dartReservedWords = {

@@ -16,9 +16,10 @@ import 'package:gg_process/gg_process.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
-/// Runs git for real; every other tool only records its call.
-///
-/// Package managers, node and gh need the network, so they are faked.
+import 'helpers/git_identity.dart';
+
+/// Runs git for real; every other tool only records its call: package
+/// managers, node and gh need the network.
 class _Processes extends GgProcessWrapper {
   final calls = <String>[];
 
@@ -59,20 +60,9 @@ class _Processes extends GgProcessWrapper {
         stdoutEncoding: utf8,
       );
     }
-    if (failing.contains(executable)) {
-      return ProcessResult(0, 1, '', '$executable failed');
-    }
     return ProcessResult(0, 0, '', '');
   }
 }
-
-/// The identity of the commits the tests make; CI has none of its own.
-const gitIdentity = {
-  'GIT_AUTHOR_NAME': 'Test',
-  'GIT_AUTHOR_EMAIL': 'test@example.com',
-  'GIT_COMMITTER_NAME': 'Test',
-  'GIT_COMMITTER_EMAIL': 'test@example.com',
-};
 
 /// GitHub without the network: a local bare repository is the remote.
 class _GitHub extends GitHub {
@@ -105,7 +95,7 @@ class _GitHub extends GitHub {
   }
 }
 
-/// Records whether the host took over.
+/// A real standalone host that records whether it took over.
 class _Host extends StandaloneHost {
   _Host(Directory dir) : super(outputDir: dir);
   final handedOver = <String>[];
@@ -128,11 +118,25 @@ void main() {
   late List<List<String>> dnaCalls;
   late List<Duration> delays;
 
+  /// Writes what `gg dna init` writes: the layers it proposes.
+  Future<void> fakeDna(List<String> args) async {
+    dnaCalls.add(args);
+    final config = File(p.join(args[2], 'dna', '_dna.json'));
+    if (args.first == 'init' && !config.existsSync()) {
+      config
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync(
+          '{\n  // Comments stay.\n  "version": 1,\n'
+          '  "layers": ["gg_args", "gg_log"]\n}\n',
+        );
+    }
+  }
+
   RepoCreator creator({RunChecks? runChecks}) => RepoCreator(
     ggLog: messages.add,
     tools: Tools(processWrapper: processes),
     gitHub: gitHub,
-    runDna: (args) async => dnaCalls.add(args),
+    runDna: fakeDna,
     runChecks: runChecks ?? (dir, ggLog) async {},
     delay: (d) async => delays.add(d),
   );
@@ -237,7 +241,7 @@ void main() {
         );
 
         expect(dnaCalls, [
-          ['init', '--target', dir.path, '--language', 'typescript'],
+          ['init', '--target', dir.path, '--language', 'typescript', '--quiet'],
           ['add', '@tssuite/dna-tssuite', '--target', dir.path],
           ['add', 'git@github.com:x/dna_x.git', '--target', dir.path],
         ]);
@@ -260,7 +264,45 @@ void main() {
         final file = File(p.join(dir.path, 'dna', '_vars.json'));
         expect(jsonDecode(file.readAsStringSync()), {'dnaCompany': 'Acme'});
         expect(dnaCalls.first.first, 'init');
-        expect(dnaCalls.first.last, 'dart');
+        expect(dnaCalls.first, contains('dart'));
+      });
+
+      test('drops the layers init proposes for the dependencies', () async {
+        final spec = RepoSpec.example(cli: true, dnaLayers: ['dna_other']);
+        dir = host.targetDir(spec);
+
+        await creator().create(
+          state: CreateRepoState(spec: spec),
+          directory: dir,
+          host: host,
+        );
+
+        final config = File(p.join(dir.path, 'dna', '_dna.json'))
+            .readAsStringSync();
+        expect(config, contains('"layers": []'));
+        expect(config, contains('// Comments stay.'));
+        expect(dnaCalls.last, ['add', 'dna_other', '--target', dir.path]);
+      });
+
+      test('leaves a folder alone where init wrote no config', () async {
+        final spec = RepoSpec.example(dnaLayers: ['dna_other']);
+        dir = host.targetDir(spec);
+
+        await RepoCreator(
+          ggLog: messages.add,
+          tools: Tools(processWrapper: processes),
+          gitHub: gitHub,
+          runDna: (args) async => dnaCalls.add(args),
+          runChecks: (dir, ggLog) async {},
+          delay: (d) async => delays.add(d),
+        ).create(
+          state: CreateRepoState(spec: spec),
+          directory: dir,
+          host: host,
+        );
+
+        expect(Directory(p.join(dir.path, 'dna')).existsSync(), false);
+        expect(dnaCalls, hasLength(2));
       });
     });
 
@@ -449,6 +491,26 @@ void main() {
       expect(delays, isEmpty);
     });
 
+    test('does not retry a push the server refused', () async {
+      processes
+        ..failingPushes = 1
+        ..pushError =
+            "fatal: unable to access 'https://github.com/x/y.git/': The "
+            'requested URL returned error: 403';
+      final spec = RepoSpec.example(dnaLayers: []);
+      dir = host.targetDir(spec);
+
+      await expectLater(
+        creator().create(
+          state: CreateRepoState(spec: spec),
+          directory: dir,
+          host: host,
+        ),
+        throwsA(isA<Exception>()),
+      );
+      expect(delays, isEmpty);
+    });
+
     test('refuses an empty repository of the other visibility', () async {
       gitHub
         ..remoteState = RemoteState.empty
@@ -473,8 +535,10 @@ void main() {
     });
 
     test('has an example on the real tools', () {
-      final example = RepoCreator.example();
+      final waited = <Duration>[];
+      final example = RepoCreator.example(delay: (d) async => waited.add(d));
       expect(example, isA<RepoCreator>());
+      expect(waited, isEmpty);
       example.ggLog('logged nowhere');
     });
   });

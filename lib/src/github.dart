@@ -194,12 +194,17 @@ class GitHub {
   /// The status and body of `gh api --include [path]`; the status is
   /// `null` when no response arrived at all.
   Future<({int? status, String body})> _api(String path, {String? jq}) async {
-    final result = await _process.run('gh', [
-      'api',
-      '--include',
-      path,
-      if (jq != null) ...['--jq', jq],
-    ], stdoutEncoding: utf8);
+    final ProcessResult result;
+    try {
+      result = await _process.run('gh', [
+        'api',
+        '--include',
+        path,
+        if (jq != null) ...['--jq', jq],
+      ], stdoutEncoding: utf8);
+    } on ProcessException catch (e) {
+      return (status: null, body: e.message);
+    }
     final out = result.stdout.toString().replaceAll('\r\n', '\n');
     final match = RegExp(r'^HTTP/\S+ (\d{3})').firstMatch(out);
     final separator = out.indexOf('\n\n');
