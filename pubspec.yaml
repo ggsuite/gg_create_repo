@@ -1,6 +1,6 @@
 name: gg_create_repo
 description: Creates new Dart and TypeScript repositories with DNA, GitHub setup and gg workspace integration.
-version: 0.0.1
+version: 0.0.2
 repository: https://github.com/ggsuite/gg_create_repo.git
 
 environment:
