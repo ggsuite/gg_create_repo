@@ -7,7 +7,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:gg_create_repo/gg_create_repo.dart';
+import 'package:gg_create_repo/src/tools.dart';
 import 'package:gg_process/gg_process.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
@@ -19,6 +19,7 @@ class _FakeProcess extends GgProcessWrapper {
 
   final ProcessResult Function(String executable) answer;
   final shells = <String, bool>{};
+  final environments = <String, Map<String, String>?>{};
 
   @override
   Future<ProcessResult> run(
@@ -32,6 +33,7 @@ class _FakeProcess extends GgProcessWrapper {
     Encoding? stderrEncoding,
   }) async {
     shells[executable] = runInShell;
+    environments[executable] = environment;
     return answer(executable);
   }
 }
@@ -126,6 +128,80 @@ void main() {
           isEmpty,
         );
       });
+    });
+
+    test('never lets git wait for a password', () async {
+      final fake = _FakeProcess((_) => ProcessResult(0, 0, '', ''));
+      final tools = Tools(processWrapper: fake);
+      await tools.run('git', ['status'], directory: d);
+      await tools.run('node', ['x'], directory: d);
+      expect(fake.environments['git'], {'GIT_TERMINAL_PROMPT': '0'});
+      expect(fake.environments['node'], isNull);
+    });
+
+    group('majorVersion()', () {
+      test('is the first number of the version', () async {
+        final fake = _FakeProcess((_) => ProcessResult(0, 0, 'v22.14.0', ''));
+        expect(await Tools(processWrapper: fake).majorVersion('node'), 22);
+      });
+
+      test('is null without a version', () async {
+        final fake = _FakeProcess((_) => ProcessResult(0, 0, 'none', ''));
+        expect(await Tools(processWrapper: fake).majorVersion('x'), isNull);
+        final failing = _FakeProcess((_) => ProcessResult(0, 1, '', ''));
+        expect(await Tools(processWrapper: failing).majorVersion('x'), isNull);
+      });
+    });
+
+    group('dartSdkVersion()', () {
+      test('reads the version of dart', () async {
+        final fake = _FakeProcess(
+          (_) => ProcessResult(
+            0,
+            0,
+            'Dart SDK version: 3.9.2 (stable) on "windows_x64"',
+            '',
+          ),
+        );
+        final tools = Tools(processWrapper: fake);
+        expect(await tools.dartSdkVersion(), '3.9.2');
+      });
+
+      test('reads the Dart bundled with flutter', () async {
+        final fake = _FakeProcess(
+          (_) => ProcessResult(
+            0,
+            0,
+            'Downloading...\n{"flutterVersion": "3.35.0", '
+                '"dartSdkVersion": "3.9.0"}',
+            '',
+          ),
+        );
+        final tools = Tools(processWrapper: fake);
+        expect(await tools.dartSdkVersion(flutter: true), '3.9.0');
+      });
+
+      test('is null when the tool answers nothing usable', () async {
+        final fake = _FakeProcess((_) => ProcessResult(0, 0, 'no json', ''));
+        final tools = Tools(processWrapper: fake);
+        expect(await tools.dartSdkVersion(flutter: true), isNull);
+        expect(await tools.dartSdkVersion(), isNull);
+      });
+
+      test('reads the real dart', () async {
+        expect(
+          await const Tools().dartSdkVersion(),
+          matches(RegExp(r'^\d+\.\d+\.\d+')),
+        );
+      });
+    });
+
+    test('example() uses a process wrapper', () async {
+      final fake = _FakeProcess((_) => ProcessResult(0, 0, 'v1.2', ''));
+      expect(Tools.example(), isA<Tools>());
+      final tools = Tools.example(processWrapper: fake, isWindows: true);
+      await tools.run('npm', ['x'], directory: d);
+      expect(fake.shells['npm'], isTrue);
     });
 
     test('has a mock', () {

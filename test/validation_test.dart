@@ -5,10 +5,11 @@
 // found in the LICENSE file in the root of this package.
 
 import 'package:gg_create_repo/gg_create_repo.dart';
+import 'package:gg_create_repo/src/validation.dart';
 import 'package:test/test.dart';
 
 void main() {
-  const v = Validation();
+  final v = Validation.example();
   const dart = RepoLanguage.dart;
   const ts = RepoLanguage.typescript;
 
@@ -35,6 +36,21 @@ void main() {
         expect(v.name('1gg', dart), contains('Dart package name'));
         expect(v.name('my-lib', dart), contains('Dart package name'));
         expect(v.name('class', dart), contains('reserved'));
+      });
+
+      test('rejects the dependencies of the skeleton', () {
+        expect(v.name('lints', dart), contains('dependency of the skeleton'));
+        expect(v.name('gg_log', dart), contains('dependency'));
+      });
+
+      test('rejects names whose class clashes with another one', () {
+        expect(v.name('string', dart), contains('»String«'));
+        expect(v.name('my_command', dart), contains('»MyCommand«'));
+        expect(v.name('gg_command_runner', dart), contains('clash'));
+      });
+
+      test('rejects the TypeScript name index', () {
+        expect(v.name('index', ts), contains('src/index.ts'));
       });
 
       test('rejects invalid npm names', () {

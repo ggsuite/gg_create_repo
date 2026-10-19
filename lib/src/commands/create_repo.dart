@@ -46,23 +46,45 @@ class CreateRepo extends Command<dynamic> {
     _addOptions();
   }
 
+  /// A command on the real tools; tests pass what they care about.
+  factory CreateRepo.example({
+    GgLog? ggLog,
+    HostFactory? host,
+    SpecCollector? collector,
+    Preflight? preflight,
+    RepoCreator? creator,
+    GgPrompts? prompts,
+  }) => CreateRepo(
+    ggLog: ggLog ?? (_) {},
+    host: host,
+    collector: collector,
+    preflight: preflight,
+    creator: creator,
+    prompts: prompts,
+  );
+
   // ...........................................................................
   @override
   final String name;
 
+  // ...........................................................................
   @override
   final String description;
 
+  // ...........................................................................
   @override
   Future<void> run() async {
     final args = argResults!;
     final host = _host(args);
-    var spec = await _collector.collect(_optionsFrom(), host);
+    final options = _optionsFrom();
+    final collected = await _collector.collect(options, host);
+    var spec = collected.spec;
     final directory = host.targetDir(spec);
-    spec = CreateRepoState.load(directory)?.spec ?? spec;
+    final earlier = CreateRepoState.load(directory);
+    if (earlier != null) spec = _continued(earlier.spec, spec, options);
 
     _logPlan(spec, directory, host);
-    final findings = await _preflight.run(spec, host);
+    final findings = await _preflight.run(spec, host, resumes: earlier != null);
     _logFindings(findings);
     if (findings.any((f) => f.level == FindingLevel.error)) {
       throw Exception(cError('Nothing was created.'));
@@ -71,7 +93,7 @@ class CreateRepo extends Command<dynamic> {
       ggLog(cAction('Dry run: nothing was created.'));
       return;
     }
-    if (_collector.asked && !(args['yes'] as bool)) {
+    if (collected.asked && !(args['yes'] as bool)) {
       final ok = await (_prompts ?? GgPrompts.current).confirm(
         prompt: 'Create ${spec.slug}?',
       );
@@ -81,17 +103,22 @@ class CreateRepo extends Command<dynamic> {
       }
     }
 
-    await _creator.create(spec: spec, directory: directory, host: host);
+    await _creator.create(
+      state: CreateRepoState(spec: spec, done: earlier?.done),
+      directory: directory,
+      host: host,
+    );
     ggLog(cSuccess('✓ Created ${spec.webUrl} in ${directory.path}'));
   }
 
-  /// The log function.
-  final GgLog ggLog;
-
+  // ...........................................................................
   /// A [StandaloneHost] in the folder given with `--output`.
   static RepoHost standaloneHost(ArgResults args) => StandaloneHost(
     outputDir: Directory(p.normalize(p.absolute(args['output'] as String))),
   );
+
+  /// The log function.
+  final GgLog ggLog;
 
   // ######################
   // Private
@@ -102,6 +129,46 @@ class CreateRepo extends Command<dynamic> {
   final Preflight _preflight;
   final RepoCreator _creator;
   final GgPrompts? _prompts;
+
+  // ...........................................................................
+  /// The spec of the earlier run, with the variables given now. Options
+  /// that contradict it are an error: the run must stay one repository.
+  RepoSpec _continued(RepoSpec earlier, RepoSpec now, RepoOptions given) {
+    if (earlier.slug != now.slug) {
+      throw Exception(
+        cError(
+              'The folder holds an earlier run of '
+              '${earlier.slug}, not of ${now.slug}. ',
+            ) +
+            cAction('Continue it with its options or move the folder away.'),
+      );
+    }
+    final differs = [
+      if (given.language != null && earlier.language != now.language)
+        'language',
+      if (given.description != null && earlier.description != now.description)
+        'description',
+      if (given.npmScope != null && earlier.npmScope != now.npmScope) 'scope',
+      if (given.isPrivate != null && earlier.isPrivate != now.isPrivate)
+        'private',
+      if (given.cli != null && earlier.cli != now.cli) 'cli',
+      if (given.example != null && earlier.example != now.example) 'example',
+      if (given.flutter != null && earlier.flutter != now.flutter) 'flutter',
+      if ((given.dnaLayers.isNotEmpty || given.withoutDna) &&
+          earlier.dnaLayers.join(',') != now.dnaLayers.join(','))
+        'dna',
+    ];
+    if (differs.isNotEmpty) {
+      throw Exception(
+        cError(
+              'The earlier run of ${earlier.slug} used other values for: '
+              '${differs.join(', ')}. ',
+            ) +
+            cAction('Run it again with its values.'),
+      );
+    }
+    return earlier.copyWith(vars: {...earlier.vars, ...now.vars});
+  }
 
   // ...........................................................................
   void _addOptions() {

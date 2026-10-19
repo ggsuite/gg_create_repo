@@ -7,6 +7,7 @@
 import 'dart:io';
 
 import 'package:gg_create_repo/gg_create_repo.dart';
+import 'package:gg_create_repo/src/scaffold/common_files.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 

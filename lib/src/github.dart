@@ -24,11 +24,31 @@ enum RemoteState {
   filled,
 }
 
+/// A repository as GitHub reports it.
+class RemoteRepo {
+  /// Constructor
+  const RemoteRepo(this.state, {this.isPrivate});
+
+  /// A realistic repository.
+  factory RemoteRepo.example({RemoteState? state, bool? isPrivate}) =>
+      RemoteRepo(state ?? RemoteState.missing, isPrivate: isPrivate);
+
+  /// Whether it is missing, empty or has commits.
+  final RemoteState state;
+
+  /// Whether it is private; `null` when it is missing.
+  final bool? isPrivate;
+}
+
 /// The GitHub operations of gg_create_repo, all through the `gh` CLI.
 class GitHub {
   /// Constructor
   const GitHub({GgProcessWrapper processWrapper = const GgProcessWrapper()})
     : _process = processWrapper;
+
+  /// A client on the real `gh`; tests pass a fake process wrapper.
+  factory GitHub.example({GgProcessWrapper? processWrapper}) =>
+      GitHub(processWrapper: processWrapper ?? const GgProcessWrapper());
 
   // ...........................................................................
   /// Whether `gh` is installed and logged in; the reason otherwise.
@@ -57,35 +77,62 @@ class GitHub {
   }
 
   // ...........................................................................
-  /// `User`, `Organization`, or `null` when no such owner exists.
-  Future<String?> ownerType(String owner) async =>
-      (await _gh(['api', 'users/$owner', '--jq', '.type']))?.trim();
+  /// Why the logged in user may not create repositories under [owner],
+  /// `null` when they may. Unknown answers count as allowed.
+  Future<String?> creationProblem(String owner) async {
+    final type = await _api('users/$owner', jq: '.type');
+    if (type.status == 404) {
+      return 'GitHub knows no organization or user »$owner«.';
+    }
+    if (type.body.trim() == 'User') {
+      final me = await login();
+      return me == null || me.toLowerCase() == owner.toLowerCase()
+          ? null
+          : 'Repositories can only be created for yourself ($me), '
+                'not for the user »$owner«.';
+    }
+    final membership = await _api(
+      'user/memberships/orgs/$owner',
+      jq: '[.state, .role] | @tsv',
+    );
+    if (membership.status == 404) {
+      return 'You are no member of the organization »$owner«.';
+    }
+    final parts = membership.body.trim().split('\t');
+    if (parts.first == 'pending') {
+      return 'Your invitation to »$owner« is not accepted yet.';
+    }
+    if (parts.length > 1 && parts[1] == 'member') {
+      final allowed = await _api(
+        'orgs/$owner',
+        jq: '.members_can_create_repositories',
+      );
+      if (allowed.body.trim() == 'false') {
+        return 'Members of »$owner« may not create repositories.';
+      }
+    }
+    return null;
+  }
 
   // ...........................................................................
-  /// Whether the repository [slug] is missing, empty or has commits.
-  ///
-  /// Only GitHub's own answers count — 404 is missing, 409 is empty. Any
-  /// other failure, a network error say, throws instead of guessing.
-  Future<RemoteState> state(String slug) async {
-    final repo = await _process.run('gh', [
-      'api',
-      'repos/$slug',
-      '--jq',
-      '.full_name',
-    ], stdoutEncoding: utf8);
-    if (repo.exitCode != 0) {
-      if (_isHttp(repo, 404)) return RemoteState.missing;
-      throw Exception('GitHub could not be asked for $slug: ${repo.stderr}');
+  /// What GitHub knows about [slug]. Only status codes count: 404 is
+  /// missing, 409 for the commits is empty; anything else throws.
+  Future<RemoteRepo> remote(String slug) async {
+    final repo = await _api('repos/$slug', jq: '.private');
+    if (repo.status == 404) return const RemoteRepo(RemoteState.missing);
+    if (repo.status != 200) {
+      throw Exception('GitHub could not be asked for $slug: ${repo.body}');
     }
-    final commits = await _process.run('gh', [
-      'api',
-      'repos/$slug/commits?per_page=1',
-    ], stdoutEncoding: utf8);
-    if (commits.exitCode == 0) return RemoteState.filled;
-    if (_isHttp(commits, 409)) return RemoteState.empty;
-    throw Exception(
-      'GitHub could not be asked for the commits of $slug: ${commits.stderr}',
-    );
+    final isPrivate = repo.body.trim() == 'true';
+    final commits = await _api('repos/$slug/commits?per_page=1');
+    return switch (commits.status) {
+      200 => RemoteRepo(RemoteState.filled, isPrivate: isPrivate),
+      409 => RemoteRepo(RemoteState.empty, isPrivate: isPrivate),
+      _ => throw Exception(
+        'GitHub could not be asked for the commits of $slug: '
+        '${commits.body}',
+      ),
+    };
   }
 
   // ...........................................................................
@@ -144,16 +191,31 @@ class GitHub {
   }
 
   // ...........................................................................
+  /// The status and body of `gh api --include [path]`; the status is
+  /// `null` when no response arrived at all.
+  Future<({int? status, String body})> _api(String path, {String? jq}) async {
+    final result = await _process.run('gh', [
+      'api',
+      '--include',
+      path,
+      if (jq != null) ...['--jq', jq],
+    ], stdoutEncoding: utf8);
+    final out = result.stdout.toString().replaceAll('\r\n', '\n');
+    final match = RegExp(r'^HTTP/\S+ (\d{3})').firstMatch(out);
+    final separator = out.indexOf('\n\n');
+    final body = separator < 0
+        ? '${result.stderr}'
+        : out.substring(separator + 2);
+    return (status: int.tryParse(match?.group(1) ?? ''), body: body);
+  }
+
+  // ...........................................................................
   Future<void> _ghOrThrow(List<String> args, String what) async {
     final result = await _process.run('gh', args, stdoutEncoding: utf8);
     if (result.exitCode != 0) {
       throw Exception('Could not $what: ${result.stderr}'.trim());
     }
   }
-
-  // ...........................................................................
-  static bool _isHttp(ProcessResult result, int status) =>
-      '${result.stderr}${result.stdout}'.contains('HTTP $status');
 
   // ...........................................................................
   List<String> _lines(String? out) => (out ?? '')

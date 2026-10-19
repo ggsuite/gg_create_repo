@@ -6,7 +6,9 @@
 
 import 'dart:io';
 
-import 'create_repo_state.dart';
+import 'package:mocktail/mocktail.dart';
+
+import 'dna/dna_variables.dart';
 import 'github.dart';
 import 'registry.dart';
 import 'repo_host.dart';
@@ -45,14 +47,30 @@ class Finding {
 /// Checks everything that can be checked before anything is created.
 class Preflight {
   /// Constructor
-  Preflight({Tools? tools, GitHub? gitHub, Registry? registry})
-    : _tools = tools ?? const Tools(),
-      _gitHub = gitHub ?? const GitHub(),
-      _registry = registry ?? Registry();
+  Preflight({
+    Tools? tools,
+    GitHub? gitHub,
+    Registry? registry,
+    this._dnaVariables = const DnaVariables(),
+  }) : _tools = tools ?? const Tools(),
+       _gitHub = gitHub ?? const GitHub(),
+       _registry = registry ?? Registry();
+
+  /// A preflight on the real tools; tests pass what they care about.
+  factory Preflight.example({
+    Tools? tools,
+    GitHub? gitHub,
+    Registry? registry,
+  }) => Preflight(tools: tools, gitHub: gitHub, registry: registry);
 
   // ...........................................................................
   /// The findings for [spec]; nothing may be created while one is an error.
-  Future<List<Finding>> run(RepoSpec spec, RepoHost host) async {
+  /// [resumes] when an earlier run of the same repository is continued.
+  Future<List<Finding>> run(
+    RepoSpec spec,
+    RepoHost host, {
+    required bool resumes,
+  }) async {
     final findings = <Finding>[];
     void error(String m) => findings.add(Finding(FindingLevel.error, m));
     void warn(String m) => findings.add(Finding(FindingLevel.warning, m));
@@ -60,11 +78,11 @@ class Preflight {
 
     await _checkGit(error);
     await _checkTools(spec, error, warn);
-    final resumes = _checkTarget(spec, host.targetDir(spec), error, info);
+    await _checkTarget(host.targetDir(spec), resumes, error, warn, info);
     await _checkGitHub(spec, resumes, error, info);
     if (!spec.isPrivate) await _checkRegistry(spec, error, warn);
-    await _checkDna(spec, error, warn);
-    for (final problem in await host.check(spec)) {
+    await _checkDna(spec, host, error, warn);
+    for (final problem in await host.check(spec, resumes: resumes)) {
       error(problem);
     }
     return findings;
@@ -77,6 +95,7 @@ class Preflight {
   final Tools _tools;
   final GitHub _gitHub;
   final Registry _registry;
+  final DnaVariables _dnaVariables;
 
   // ...........................................................................
   Future<void> _checkGit(void Function(String) error) async {
@@ -107,43 +126,57 @@ class Preflight {
     final problem = await _gitHub.authProblem();
     if (problem != null) error(problem);
 
-    final needed = switch (spec.language) {
-      RepoLanguage.dart => [spec.flutter ? 'flutter' : 'dart'],
-      RepoLanguage.typescript => ['node', 'pnpm'],
-    };
-    for (final tool in needed) {
-      if (await _tools.version(tool) == null) error('$tool is not installed.');
+    if (spec.language == RepoLanguage.typescript) {
+      if (await _tools.version('node') == null) error('node is not installed.');
+      final pnpm = await _tools.majorVersion('pnpm');
+      if (pnpm == null) {
+        error('pnpm is not installed.');
+      } else if (pnpm < 10) {
+        error('pnpm $pnpm is too old: 10 or newer is needed.');
+      }
+      return;
     }
 
-    final usesNode = spec.language == RepoLanguage.dart;
-    if (usesNode && spec.dnaLayers.isNotEmpty) {
-      if (await _tools.version('node') == null) {
-        warn(
-          'node is not installed: the GitHub setup script of the DNA cannot '
-          'run, only the merge settings will be applied.',
-        );
-      }
+    final tool = spec.flutter ? 'flutter' : 'dart';
+    if (await _tools.version(tool) == null) error('$tool is not installed.');
+    final nodeOptional = spec.dnaLayers.isNotEmpty;
+    if (nodeOptional && await _tools.version('node') == null) {
+      warn(
+        'node is not installed: the GitHub setup script of the DNA cannot '
+        'run, only the merge settings will be applied.',
+      );
     }
   }
 
   // ...........................................................................
-  /// Whether [dir] holds an earlier run of the same repository.
-  bool _checkTarget(
-    RepoSpec spec,
+  Future<void> _checkTarget(
     Directory dir,
+    bool resumes,
     void Function(String) error,
+    void Function(String) warn,
     void Function(String) info,
-  ) {
-    if (!dir.existsSync()) return false;
-    final state = CreateRepoState.load(dir);
-    if (state != null && state.spec.slug == spec.slug) {
+  ) async {
+    if (resumes) {
       info('Continues the earlier run in ${dir.path}.');
-      return true;
+      return;
     }
-    if (dir.listSync().isNotEmpty) {
+    if (dir.existsSync() && dir.listSync().isNotEmpty) {
       error('${dir.path} already exists and is not empty.');
     }
-    return false;
+    final parent = dir.parent;
+    if (!parent.existsSync()) return;
+    try {
+      final outer = await _tools.run('git', [
+        'rev-parse',
+        '--show-toplevel',
+      ], directory: parent);
+      warn(
+        '${dir.path} is inside the git repository ${outer.trim()}: the new '
+        'repository becomes a nested one.',
+      );
+    } on Exception {
+      // Not inside a git repository: as it should be.
+    }
   }
 
   // ...........................................................................
@@ -153,20 +186,27 @@ class Preflight {
     void Function(String) error,
     void Function(String) info,
   ) async {
-    if (await _gitHub.ownerType(spec.org) == null) {
-      error('GitHub knows no organization or user »${spec.org}«.');
+    final problem = await _gitHub.creationProblem(spec.org);
+    if (problem != null) {
+      error(problem);
       return;
     }
-    final RemoteState state;
+    final RemoteRepo remote;
     try {
-      state = await _gitHub.state(spec.slug);
+      remote = await _gitHub.remote(spec.slug);
     } on Exception catch (e) {
       error('$e');
       return;
     }
-    switch (state) {
+    final visibility = remote.isPrivate == true ? 'private' : 'public';
+    switch (remote.state) {
       case RemoteState.missing:
         break;
+      case RemoteState.empty when remote.isPrivate != spec.isPrivate:
+        error(
+          'The empty repository ${spec.webUrl} is $visibility; it does not '
+          'match the repository to create.',
+        );
       case RemoteState.empty:
         info('The empty repository ${spec.webUrl} will be used.');
       case RemoteState.filled when resumes:
@@ -195,13 +235,16 @@ class Preflight {
   }
 
   // ...........................................................................
+  /// Sorts every layer the way helix does: a git URL, or a package of the
+  /// registry of the new repository.
   Future<void> _checkDna(
     RepoSpec spec,
+    RepoHost host,
     void Function(String) error,
     void Function(String) warn,
   ) async {
     for (final layer in spec.dnaLayers) {
-      if (_isGitUrl(layer)) {
+      if (isGitUrl(layer)) {
         try {
           await _tools.run('git', [
             'ls-remote',
@@ -213,17 +256,43 @@ class Preflight {
         }
         continue;
       }
-      final language = layer.startsWith('@')
-          ? RepoLanguage.typescript
-          : RepoLanguage.dart;
-      final registry = Registry.nameOf(language);
-      final exists = await _registry.has(layer, language);
+      final npmOnly = layer.startsWith('@') || layer.contains('-');
+      if (spec.language == RepoLanguage.dart && npmOnly) {
+        error(
+          'The DNA layer $layer is an npm package; a Dart repository '
+          'needs a pub package or a git URL.',
+        );
+        continue;
+      }
+      if (host.layerDir(layer) != null) continue;
+      final registry = Registry.nameOf(spec.language);
+      final exists = await _registry.has(layer, spec.language);
       if (exists == false) error('The DNA layer $layer is not on $registry.');
       if (exists == null) warn('$registry could not be asked for $layer.');
+    }
+
+    final unresolved = _dnaVariables
+        .missing(layers: spec.dnaLayers, given: spec.vars, host: host)
+        .unresolved;
+    for (final layer in unresolved) {
+      warn(
+        'The required variables of $layer are only known once it is '
+        'installed; helix asks for missing ones then.',
+      );
     }
   }
 
   // ...........................................................................
-  static bool _isGitUrl(String layer) =>
-      layer.contains('://') || layer.startsWith('git@');
+  /// Whether [layer] is a git URL, by the rules of helix' `AddTarget`.
+  static bool isGitUrl(String layer) =>
+      layer.startsWith('https://') ||
+      layer.startsWith('http://') ||
+      layer.startsWith('git://') ||
+      layer.startsWith('git+') ||
+      layer.startsWith('ssh://') ||
+      layer.endsWith('.git') ||
+      RegExp(r'^[^@/\s]+@[^:/\s]+:').hasMatch(layer);
 }
+
+/// Mock for [Preflight].
+class MockPreflight extends Mock implements Preflight {}

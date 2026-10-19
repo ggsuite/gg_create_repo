@@ -10,17 +10,21 @@ import 'dart:io';
 import 'package:gg_process/gg_process.dart';
 import 'package:mocktail/mocktail.dart';
 
-/// Runs the command line tools gg_create_repo needs.
-///
-/// On Windows `pnpm`, `npm` and `flutter` are batch files, which only a
-/// shell can start; everything else runs without one, so no argument is
-/// ever reinterpreted by `cmd.exe`.
+/// Runs the command line tools gg_create_repo needs. Only the batch files
+/// `pnpm`, `npm`, `npx` and `flutter` go through a shell on Windows.
 class Tools {
   /// Constructor
   const Tools({
     GgProcessWrapper processWrapper = const GgProcessWrapper(),
     this._isWindows,
   }) : _process = processWrapper;
+
+  /// The real tools; tests pass a fake process wrapper.
+  factory Tools.example({GgProcessWrapper? processWrapper, bool? isWindows}) =>
+      Tools(
+        processWrapper: processWrapper ?? const GgProcessWrapper(),
+        isWindows: isWindows,
+      );
 
   // ...........................................................................
   /// Runs [executable] in [directory] and throws with its output on failure.
@@ -54,6 +58,36 @@ class Tools {
   }
 
   // ...........................................................................
+  /// The major version of [executable], e.g. 22 for `v22.14.0`.
+  Future<int?> majorVersion(String executable) async {
+    final match = RegExp(r'(\d+)\.\d+')
+        .firstMatch(await version(executable) ?? '');
+    return match == null ? null : int.parse(match.group(1)!);
+  }
+
+  // ...........................................................................
+  /// The Dart SDK version of `dart`, or of the Dart bundled with
+  /// `flutter` when [flutter] is set; `null` if unknown.
+  Future<String?> dartSdkVersion({bool flutter = false}) async {
+    try {
+      if (flutter) {
+        final result = await _start('flutter', [
+          '--version',
+          '--machine',
+        ], null);
+        final out = result.stdout.toString();
+        final json = jsonDecode(out.substring(out.indexOf('{')));
+        return (json as Map<String, dynamic>)['dartSdkVersion'] as String?;
+      }
+      final match = RegExp(r'version: (\S+)')
+          .firstMatch(await version('dart') ?? '');
+      return match?.group(1);
+    } on Object {
+      return null;
+    }
+  }
+
+  // ...........................................................................
   /// The value of `git config [key]`, empty when it is not set.
   Future<String> gitConfig(String key) async {
     try {
@@ -73,6 +107,9 @@ class Tools {
 
   static const _batchFiles = {'pnpm', 'npm', 'npx', 'flutter'};
 
+  /// git may never wait for a password: nobody would see the question.
+  static const _gitEnvironment = {'GIT_TERMINAL_PROMPT': '0'};
+
   // ...........................................................................
   Future<ProcessResult> _start(
     String executable,
@@ -82,6 +119,7 @@ class Tools {
     executable,
     args,
     workingDirectory: workingDirectory,
+    environment: executable == 'git' ? _gitEnvironment : null,
     runInShell:
         (_isWindows ?? Platform.isWindows) && _batchFiles.contains(executable),
     stdoutEncoding: utf8,

@@ -7,6 +7,15 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:gg_one_core/gg_one_core.dart'
+    show
+        buildMustRunScript,
+        buildPreScript,
+        prepublishMustRunScript,
+        prepublishScriptNames;
+import 'package:path/path.dart' as p;
+
+import '../json_file.dart';
 import '../repo_spec.dart';
 import '../tools.dart';
 import 'common_files.dart';
@@ -15,8 +24,12 @@ import 'scaffold.dart';
 /// The skeleton of a TypeScript package built with vite, tested with
 /// vitest at 100 % coverage and managed with pnpm.
 class TsScaffold extends Scaffold {
-  /// Constructor
-  const TsScaffold();
+  /// Constructor; [nodeMajor] is the major version of the installed node.
+  const TsScaffold({this._nodeMajor});
+
+  /// A scaffold for node 22; tests pass what they care about.
+  factory TsScaffold.example({int? nodeMajor}) =>
+      TsScaffold(nodeMajor: nodeMajor ?? 22);
 
   // ...........................................................................
   @override
@@ -41,33 +54,34 @@ class TsScaffold extends Scaffold {
   // ...........................................................................
   @override
   Future<void> install(Directory directory, RepoSpec spec, Tools tools) async {
+    final packageJson = _json(directory, ['package.json']);
     final pnpm = await tools.version('pnpm');
-    if (pnpm != null) _setPackageManager(directory, pnpm);
+    if (pnpm != null) {
+      packageJson.edit((json) => json['packageManager'] = 'pnpm@$pnpm');
+    }
     await tools.run('pnpm', [
       'add',
       '--save-dev',
       ..._devDependencies,
     ], directory: directory);
-    _setTypescript(directory, typescriptRange(directory));
+    _setTypescript(packageJson, typescriptRange(directory));
     await tools.run('pnpm', ['install'], directory: directory);
     final installed = _installedVersion(directory, 'typescript');
     if (installed != null) {
-      _setTypescript(directory, '^$installed');
+      _setTypescript(packageJson, '^$installed');
       await tools.run('pnpm', ['install'], directory: directory);
     }
   }
 
   // ...........................................................................
-  /// The TypeScript versions the installed typescript-eslint supports.
-  ///
-  /// The newest TypeScript is often ahead of typescript-eslint; taking its
-  /// peer range keeps lint working without pinning a major here.
+  /// The TypeScript versions the installed typescript-eslint supports:
+  /// the newest TypeScript is often ahead of it.
   String typescriptRange(Directory directory) {
-    final file = File(
-      '${directory.path}/node_modules/typescript-eslint/package.json',
-    );
-    if (!file.existsSync()) return 'latest';
-    final json = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+    final json = _json(directory, [
+      'node_modules',
+      'typescript-eslint',
+      'package.json',
+    ]).read();
     final peers = json['peerDependencies'] as Map<String, dynamic>? ?? {};
     return peers['typescript'] as String? ?? 'latest';
   }
@@ -83,7 +97,7 @@ class TsScaffold extends Scaffold {
       'bugs': '${spec.webUrl}/issues',
       'private': spec.isPrivate,
       'license': spec.isPrivate ? 'UNLICENSED' : 'MIT',
-      'engines': {'node': '>=22.14.0'},
+      'engines': {'node': '>=${_nodeMajor ?? 22}'},
       'repository': {'type': 'git', 'url': 'git+${spec.webUrl}.git'},
       'type': 'module',
       'main': 'dist/${spec.name}.js',
@@ -93,20 +107,25 @@ class TsScaffold extends Scaffold {
       },
       'files': ['dist'],
       if (!spec.isPrivate) 'publishConfig': {'access': 'public'},
-      'scripts': {
-        'build': 'vite build',
-        'prebuild': 'pnpm run test',
-        'test': 'vitest run --coverage && pnpm run lint',
-        'lint': 'tsc --noEmit && eslint',
-        'prepublishOnly': 'pnpm run build',
-      },
+      'scripts': scripts,
     };
     return '${const JsonEncoder.withIndent('  ').convert(json)}\n';
   }
 
+  /// The npm scripts, named as gg's package.json check expects them.
+  static final scripts = <String, String>{
+    'build': 'vite build',
+    buildPreScript: 'pnpm run $buildMustRunScript',
+    'test': 'vitest run --coverage && pnpm run lint',
+    'lint': 'tsc --noEmit && eslint',
+    prepublishScriptNames.first: 'pnpm run $prepublishMustRunScript',
+  };
+
   // ######################
   // Private
   // ######################
+
+  final int? _nodeMajor;
 
   static const _devDependencies = [
     '@eslint/js',
@@ -120,17 +139,10 @@ class TsScaffold extends Scaffold {
   ];
 
   // ...........................................................................
-  /// Pins the pnpm that installed the package, as corepack expects it.
-  void _setPackageManager(Directory directory, String version) =>
-      _editPackageJson(directory, (json) {
-        json['packageManager'] = 'pnpm@$version';
-      });
-
-  // ...........................................................................
-  /// Writes the TypeScript constraint into package.json, not through the
-  /// shell: `cmd.exe` would read the `<` and `>` of a range as redirects.
-  void _setTypescript(Directory directory, String constraint) =>
-      _editPackageJson(directory, (json) {
+  /// The constraint goes into package.json, not through the shell:
+  /// `cmd.exe` would read the `<` and `>` of a range as redirects.
+  void _setTypescript(JsonFile packageJson, String constraint) =>
+      packageJson.edit((json) {
         final dev = json['devDependencies'] as Map<String, dynamic>? ?? {};
         dev['typescript'] = constraint;
         json['devDependencies'] = Map.fromEntries(
@@ -139,25 +151,17 @@ class TsScaffold extends Scaffold {
       });
 
   // ...........................................................................
-  String? _installedVersion(Directory directory, String package) {
-    final file = File('${directory.path}/node_modules/$package/package.json');
-    if (!file.existsSync()) return null;
-    final json = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
-    return json['version'] as String?;
-  }
+  String? _installedVersion(Directory directory, String package) =>
+      _json(directory, [
+            'node_modules',
+            package,
+            'package.json',
+          ]).read()['version']
+          as String?;
 
   // ...........................................................................
-  void _editPackageJson(
-    Directory directory,
-    void Function(Map<String, dynamic> json) edit,
-  ) {
-    final file = File('${directory.path}/package.json');
-    final json = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
-    edit(json);
-    file.writeAsStringSync(
-      '${const JsonEncoder.withIndent('  ').convert(json)}\n',
-    );
-  }
+  JsonFile _json(Directory directory, List<String> parts) =>
+      JsonFile(File(p.joinAll([directory.path, ...parts])));
 
   // ...........................................................................
   String _index(RepoSpec spec) =>
@@ -264,7 +268,12 @@ export default defineConfig({
       provider: 'v8',
       include: ['src/**/*.ts'],
       exclude: ['src/index.ts'],
-      thresholds: { lines: 100, functions: 100, branches: 100, statements: 100 },
+      thresholds: {
+        lines: 100,
+        functions: 100,
+        branches: 100,
+        statements: 100,
+      },
     },
   },
 });

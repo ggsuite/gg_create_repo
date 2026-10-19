@@ -8,6 +8,15 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:gg_create_repo/gg_create_repo.dart';
+import 'package:gg_create_repo/src/scaffold/ts_scaffold.dart';
+import 'package:gg_create_repo/src/tools.dart';
+import 'package:gg_one_core/gg_one_core.dart'
+    show
+        buildMustRunScript,
+        buildPreScript,
+        prepublishMustRunScript,
+        prepublishScriptNames,
+        requiredNpmScripts;
 import 'package:gg_process/gg_process.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
@@ -90,7 +99,7 @@ void main() {
   setUp(() => dir = Directory.systemTemp.createTempSync('ts_scaffold_'));
   tearDown(() => dir.deleteSync(recursive: true));
 
-  const scaffold = TsScaffold();
+  final scaffold = TsScaffold.example();
   const tricky = r'''Says: "hi" and 'bye' for $5 \ less''';
 
   RepoSpec ts({bool isPrivate = false, String? npmScope}) => RepoSpec.example(
@@ -124,9 +133,15 @@ void main() {
           'url': 'git+https://github.com/ggsuite/my-lib.git',
         });
         final scripts = pkg['scripts'] as Map<String, dynamic>;
-        expect(scripts['prebuild'], contains('test'));
-        expect(scripts['prepublishOnly'], contains('build'));
+        expect(scripts.keys, containsAll(requiredNpmScripts));
+        expect(scripts[buildPreScript], contains(buildMustRunScript));
+        expect(
+          scripts[prepublishScriptNames.first],
+          contains(prepublishMustRunScript),
+        );
         expect(scripts['test'], contains('vitest run --coverage'));
+        expect(scripts, TsScaffold.scripts);
+        expect(pkg['engines'], {'node': '>=22'});
         expect(read('package.json'), endsWith('}\n'));
 
         expect(read('pnpm-workspace.yaml'), contains('esbuild: true'));
@@ -135,6 +150,11 @@ void main() {
         expect(jsonDecode(read('tsconfig.json')), isA<Map<String, dynamic>>());
         expect(read('vite.config.mts'), contains("fileName: 'my-lib'"));
         expect(read('vitest.config.mts'), contains('lines: 100'));
+        for (final file in ['vitest.config.mts', 'vite.config.mts']) {
+          for (final line in read(file).split('\n')) {
+            expect(line.length, lessThanOrEqualTo(80), reason: file);
+          }
+        }
         expect(read('eslint.config.js'), contains('typescript-eslint'));
         expect(read('src/index.ts'), contains("export * from './my-lib.ts';"));
         expect(read('src/my-lib.ts'), contains('export class MyLib {'));
@@ -150,6 +170,16 @@ void main() {
         expect(pkg['private'], isTrue);
         expect(pkg['license'], 'UNLICENSED');
         expect(pkg.containsKey('publishConfig'), isFalse);
+      });
+
+      test('requires the node it was created with', () {
+        const TsScaffold(nodeMajor: 24).write(dir, ts());
+        expect(packageJson()['engines'], {'node': '>=24'});
+      });
+
+      test('requires node 22 when the node version is unknown', () {
+        const TsScaffold().write(dir, ts());
+        expect(packageJson()['engines'], {'node': '>=22'});
       });
 
       test('takes another npm scope', () {

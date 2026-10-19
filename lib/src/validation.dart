@@ -5,14 +5,16 @@
 // found in the LICENSE file in the root of this package.
 
 import 'repo_language.dart';
+import 'scaffold/scaffold.dart';
 
 /// Checks the values of a new repository before anything is created.
-///
-/// Every method returns `null` for a valid value and the reason otherwise,
-/// so the same rules serve the options and the interactive prompts.
+/// Every method returns `null` for a valid value and the reason otherwise.
 class Validation {
   /// Constructor
   const Validation();
+
+  /// The rules; there is nothing to configure.
+  factory Validation.example() => const Validation();
 
   // ...........................................................................
   /// The name of the repository, its folder and its package.
@@ -91,6 +93,14 @@ class Validation {
     if (_dartReservedWords.contains(name)) {
       return '»$name« is a reserved word in Dart.';
     }
+    if (_skeletonDependencies.contains(name)) {
+      return '»$name« is a dependency of the skeleton itself.';
+    }
+    final pascal = Scaffold.pascalCase(name);
+    if (_takenClassNames.contains(pascal)) {
+      return 'The class »$pascal« of »$name« would clash with a Dart or '
+          'gg class of the same name.';
+    }
     return null;
   }
 
@@ -101,6 +111,9 @@ class Validation {
         name.startsWith('_')) {
       return '»$name« is no valid npm package name: use lowercase '
           'letters, digits, ».«, »-« and »_«, not starting with ».« or »_«.';
+    }
+    if (name == 'index') {
+      return '»index« is taken by src/index.ts.';
     }
     return null;
   }
@@ -113,6 +126,25 @@ class Validation {
     'con', 'prn', 'aux', 'nul', //
     'com1', 'com2', 'com3', 'com4', 'com5', 'com6', 'com7', 'com8', 'com9',
     'lpt1', 'lpt2', 'lpt3', 'lpt4', 'lpt5', 'lpt6', 'lpt7', 'lpt8', 'lpt9',
+  };
+
+  /// Packages the Dart skeleton depends on; pub cannot add a package to
+  /// itself.
+  static const _skeletonDependencies = {
+    'args', 'flutter', 'flutter_lints', 'flutter_test', 'gg_args', //
+    'gg_log', 'helix', 'lints', 'test',
+  };
+
+  /// Classes of `dart:core` and of the skeleton a package class would hide.
+  static const _takenClassNames = {
+    'BigInt', 'Comparable', 'Command', 'CommandRunner', 'DateTime', //
+    'Deprecated', 'Duration', 'Enum', 'Error', 'Exception', 'Expando',
+    'Finalizer', 'Function', 'Future', 'GgCommandRunner', 'GgLog',
+    'Invocation', 'Iterable', 'Iterator', 'List', 'Map', 'MapEntry',
+    'Match', 'MyCommand', 'Null', 'Object', 'Pattern', 'Record', 'RegExp',
+    'Runes', 'Set', 'Sink', 'StackTrace', 'Stopwatch', 'Stream', 'String',
+    'StringBuffer', 'StringSink', 'Symbol', 'Type', 'Uri', 'UriData',
+    'WeakReference',
   };
 
   static const _dartReservedWords = {

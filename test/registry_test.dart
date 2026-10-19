@@ -4,7 +4,10 @@
 // Use of this source code is governed by terms that can be
 // found in the LICENSE file in the root of this package.
 
+import 'dart:async';
+
 import 'package:gg_create_repo/gg_create_repo.dart';
+import 'package:gg_create_repo/src/registry.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:test/test.dart';
@@ -50,8 +53,18 @@ void main() {
       expect(await offline.has('gg_x', RepoLanguage.dart), isNull);
     });
 
-    test('has a default client', () {
+    test('is null when the registry does not answer in time', () async {
+      final slow = Registry(
+        timeout: const Duration(milliseconds: 10),
+        client: MockClient((_) => Completer<http.Response>().future),
+      );
+      expect(await slow.has('gg_x', RepoLanguage.dart), isNull);
+    });
+
+    test('has a default client and an example', () {
       expect(Registry(), isA<Registry>());
+      expect(Registry.example(), isA<Registry>());
+      expect(MockRegistry(), isA<Registry>());
     });
 
     test('nameOf() names the registry', () {

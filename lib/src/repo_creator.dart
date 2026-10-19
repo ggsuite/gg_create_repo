@@ -4,26 +4,25 @@
 // Use of this source code is governed by terms that can be
 // found in the LICENSE file in the root of this package.
 
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/command_runner.dart';
 import 'package:gg_console_colors/gg_console_colors.dart';
-import 'package:gg_interact/gg_interact.dart';
 import 'package:gg_log/gg_log.dart';
 import 'package:gg_one_commit/gg_one_commit.dart';
 import 'package:gg_status_printer/gg_status_printer.dart';
-import 'package:helix/helix.dart' as helix;
+import 'package:mocktail/mocktail.dart';
 import 'package:path/path.dart' as p;
 
 import 'create_repo_state.dart';
+import 'dna/gg_dna.dart';
 import 'github.dart';
+import 'json_file.dart';
 import 'repo_host.dart';
 import 'repo_language.dart';
 import 'repo_spec.dart';
 import 'scaffold/common_files.dart';
 import 'scaffold/scaffold.dart';
-import 'spec_collector.dart';
 import 'tools.dart';
 
 /// Runs one `gg dna` command with [args]; the seam of the tests.
@@ -32,34 +31,46 @@ typedef RunDna = Future<void> Function(List<String> args);
 /// Runs the gg checks in [directory] and records them in `.gg/gg.json`.
 typedef RunChecks = Future<void> Function(Directory directory, GgLog ggLog);
 
-/// Creates a repository step by step and continues an interrupted run.
-///
-/// Every step is recorded in [CreateRepoState] once it is done, so running
-/// again skips what is done and repeats only the step that failed.
+/// Creates a repository step by step. Every step is recorded once it is
+/// done, so running again skips it and repeats only the step that failed.
 class RepoCreator {
   /// Constructor
   RepoCreator({
     required this.ggLog,
     Tools? tools,
     GitHub? gitHub,
-    RunDna? runDna,
+    this._runDna,
     RunChecks? runChecks,
     Future<void> Function(Duration)? delay,
   }) : _tools = tools ?? const Tools(),
        _gitHub = gitHub ?? const GitHub(),
-       _runDna = runDna ?? _helixDna(ggLog),
        _runChecks = runChecks ?? _ggChecks,
        _delay = delay ?? Future<void>.delayed;
 
+  /// A creator on the real tools; tests pass what they care about.
+  factory RepoCreator.example({
+    GgLog? ggLog,
+    Tools? tools,
+    GitHub? gitHub,
+    RunDna? runDna,
+    RunChecks? runChecks,
+  }) => RepoCreator(
+    ggLog: ggLog ?? (_) {},
+    tools: tools,
+    gitHub: gitHub,
+    runDna: runDna,
+    runChecks: runChecks,
+  );
+
   // ...........................................................................
-  /// Creates [spec] in [directory] and hands it over to [host].
+  /// Runs the steps of [state] not done yet in [directory].
   Future<void> create({
-    required RepoSpec spec,
+    required CreateRepoState state,
     required Directory directory,
     required RepoHost host,
   }) async {
-    final state =
-        CreateRepoState.load(directory) ?? CreateRepoState(spec: spec);
+    directory.createSync(recursive: true);
+    state.save(directory);
     for (final step in CreateStep.values) {
       if (state.done.contains(step)) {
         ggLog(darkGray('✓ ${step.label} (done before)'));
@@ -68,7 +79,7 @@ class RepoCreator {
       await GgStatusPrinter<void>(
         message: step.label,
         ggLog: ggLog,
-      ).run(() => _run(step, spec, directory, host));
+      ).run(() => _run(step, state.spec, directory, host));
       state.markDone(step, directory);
     }
     CreateRepoState.delete(directory);
@@ -83,9 +94,18 @@ class RepoCreator {
 
   final Tools _tools;
   final GitHub _gitHub;
-  final RunDna _runDna;
+  final RunDna? _runDna;
   final RunChecks _runChecks;
   final Future<void> Function(Duration) _delay;
+
+  /// helix' commands are built on the first use, not with every gg call.
+  late final RunDna _dnaRunner = _runDna ?? _helixDna(ggLog);
+
+  static final _networkError = RegExp(
+    'Could not resolve host|Connection (refused|reset|timed out)|'
+    'timed out|unable to access|Could not read from remote|early EOF',
+    caseSensitive: false,
+  );
 
   // ...........................................................................
   Future<void> _run(
@@ -95,7 +115,7 @@ class RepoCreator {
     RepoHost host,
   ) => switch (step) {
     CreateStep.scaffold => _scaffold(spec, dir),
-    CreateStep.install => Scaffold.forSpec(spec).install(dir, spec, _tools),
+    CreateStep.install => _install(spec, dir),
     CreateStep.initialCommit => _commitAll(dir, 'Initial version'),
     CreateStep.dna => _dna(spec, dir),
     CreateStep.check => _check(dir),
@@ -110,9 +130,19 @@ class RepoCreator {
   };
 
   // ...........................................................................
+  Future<Scaffold> _scaffoldFor(RepoSpec spec) async => Scaffold.forSpec(
+    spec,
+    dartSdk: spec.language == RepoLanguage.dart
+        ? await _tools.dartSdkVersion(flutter: spec.flutter)
+        : null,
+    nodeMajor: spec.language == RepoLanguage.typescript
+        ? await _tools.majorVersion('node')
+        : null,
+  );
+
+  // ...........................................................................
   Future<void> _scaffold(RepoSpec spec, Directory dir) async {
-    dir.createSync(recursive: true);
-    Scaffold.forSpec(spec).write(dir, spec);
+    (await _scaffoldFor(spec)).write(dir, spec);
     const CommonFiles().write(dir, spec);
     if (!Directory(p.join(dir.path, '.git')).existsSync()) {
       await _git(dir, ['init', '--initial-branch=main']);
@@ -120,43 +150,29 @@ class RepoCreator {
   }
 
   // ...........................................................................
+  Future<void> _install(RepoSpec spec, Directory dir) async =>
+      (await _scaffoldFor(spec)).install(dir, spec, _tools);
+
+  // ...........................................................................
   Future<void> _dna(RepoSpec spec, Directory dir) async {
     if (spec.dnaLayers.isEmpty) return;
-    _writeVars(spec, dir);
+    if (spec.vars.isNotEmpty) {
+      JsonFile(File(p.join(dir.path, 'dna', '_vars.json')))
+          .edit((vars) => vars.addAll(spec.vars));
+    }
     final language = spec.language == RepoLanguage.dart ? 'dart' : 'typescript';
-    await _runDna(['init', '--target', dir.path, '--language', language]);
+    await _dnaRunner(['init', '--target', dir.path, '--language', language]);
     for (final layer in spec.dnaLayers) {
-      await _runDna(['add', layer, '--target', dir.path]);
+      await _dnaRunner(['add', layer, '--target', dir.path]);
     }
   }
 
   // ...........................................................................
-  /// Merges the variables of [spec] into `dna/_vars.json`.
-  void _writeVars(RepoSpec spec, Directory dir) {
-    if (spec.vars.isEmpty) return;
-    final file = File(p.join(dir.path, 'dna', '_vars.json'));
-    final vars = file.existsSync()
-        ? jsonDecode(file.readAsStringSync()) as Map<String, dynamic>
-        : <String, dynamic>{};
-    vars.addAll(spec.vars);
-    file.parent.createSync(recursive: true);
-    file.writeAsStringSync(
-      '${const JsonEncoder.withIndent('  ').convert(vars)}\n',
-    );
-  }
-
-  // ...........................................................................
+  /// gg leaves its state uncommitted on main; it goes into the last commit.
   Future<void> _check(Directory dir) async {
     await _commitAll(dir, 'Complete the initial version');
     await _runChecks(dir, ggLog);
-    await _amendState(dir);
-  }
-
-  // ...........................................................................
-  /// gg leaves its state uncommitted on main; it goes into the last commit.
-  Future<void> _amendState(Directory dir) async {
-    final status = await _git(dir, ['status', '--porcelain']);
-    if (status.trim().isEmpty) return;
+    if ((await _git(dir, ['status', '--porcelain'])).trim().isEmpty) return;
     await _git(dir, ['add', '--all']);
     await _git(dir, ['commit', '--amend', '--no-edit']);
   }
@@ -172,10 +188,15 @@ class RepoCreator {
 
   // ...........................................................................
   Future<void> _remote(RepoSpec spec) async {
-    final state = await _gitHub.state(spec.slug);
-    switch (state) {
+    final remote = await _gitHub.remote(spec.slug);
+    switch (remote.state) {
       case RemoteState.missing:
         await _gitHub.create(spec);
+      case RemoteState.empty when remote.isPrivate != spec.isPrivate:
+        throw Exception(
+          cError('The visibility of the empty ${spec.webUrl} differs. ') +
+              cAction('Change it on GitHub or pick another name.'),
+        );
       case RemoteState.empty:
         ggLog(darkGray('Using the empty repository ${spec.webUrl}'));
       case RemoteState.filled:
@@ -196,37 +217,43 @@ class RepoCreator {
   }
 
   // ...........................................................................
+  /// Retries [task] twice when it fails with a network error.
   Future<T> _retry<T>(Future<T> Function() task) async {
     for (var attempt = 1; ; attempt++) {
       try {
         return await task();
-      } on Exception {
-        if (attempt == 3) rethrow;
+      } on Exception catch (e) {
+        if (attempt == 3 || !_networkError.hasMatch('$e')) rethrow;
         await _delay(Duration(seconds: 2 * attempt));
       }
     }
   }
 
   // ...........................................................................
-  /// The setup script of the DNA, else only the merge settings.
+  /// The setup script of the DNA; the merge settings when there is none or
+  /// it cannot run.
   Future<void> _github(RepoSpec spec, Directory dir) async {
-    final script = File(p.join(dir.path, 'scripts', 'setup-github-repo.js'));
-    try {
-      if (script.existsSync()) {
+    final script = p.join('scripts', 'setup-github-repo.js');
+    if (File(p.join(dir.path, script)).existsSync()) {
+      try {
         await _tools.run('node', [
-          p.join('scripts', 'setup-github-repo.js'),
+          script,
           spec.slug,
           '--apply',
         ], directory: dir);
-      } else {
-        await _gitHub.applyMergeSettings(spec.slug);
-        ggLog(
-          cWarn(
-            'No DNA brought scripts/setup-github-repo.js: only the merge '
-            'settings were applied, the main branch is not protected.',
-          ),
-        );
+        return;
+      } on Exception catch (e) {
+        ggLog(cWarn('The setup script of the DNA failed: $e'));
       }
+    }
+    try {
+      await _gitHub.applyMergeSettings(spec.slug);
+      ggLog(
+        cWarn(
+          'Only the merge settings were applied: the main branch is not '
+          'protected.',
+        ),
+      );
     } on Exception catch (e) {
       ggLog(
         cWarn(
@@ -245,7 +272,7 @@ class RepoCreator {
   // coverage:ignore-start
   static RunDna _helixDna(GgLog ggLog) {
     final runner = CommandRunner<dynamic>('gg', 'gg')
-      ..addCommand(_DnaCommand(ggLog));
+      ..addCommand(GgDna(ggLog: ggLog));
     return (args) => runner.run(['dna', ...args]);
   }
 
@@ -259,36 +286,9 @@ class RepoCreator {
       force: true,
     );
   }
+
+  // coverage:ignore-end
 }
 
-/// `gg dna` with helix' commands, asking through [GgPrompts].
-class _DnaCommand extends Command<dynamic> {
-  _DnaCommand(GgLog ggLog) {
-    helix.Helix(
-      ggLog: ggLog,
-      selectPrompt: ({required prompt, required options}) =>
-          _ask((prompts) => prompts.select(prompt: prompt, options: options)),
-      textPrompt: ({required prompt, defaultValue}) => _ask(
-        (prompts) => prompts.input(prompt: prompt, defaultValue: defaultValue),
-      ),
-    ).subcommands.values.forEach(addSubcommand);
-  }
-
-  @override
-  final name = 'dna';
-
-  @override
-  final description = 'Manage the DNA of a repo';
-
-  /// Lets helix fall back when gg's own prompts have no terminal.
-  static Future<T> _ask<T>(Future<T> Function(GgPrompts) question) {
-    final prompts = GgPrompts.current;
-    if (identical(prompts, GgPrompts.defaultPrompts) &&
-        !SpecCollector.stdioHasTerminal()) {
-      throw const helix.PromptUnavailableException('stdin is no terminal');
-    }
-    return question(prompts);
-  }
-}
-
-// coverage:ignore-end
+/// Mock for [RepoCreator].
+class MockRepoCreator extends Mock implements RepoCreator {}

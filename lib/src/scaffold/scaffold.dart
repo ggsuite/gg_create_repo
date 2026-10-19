@@ -17,11 +17,13 @@ abstract class Scaffold {
   /// Constructor
   const Scaffold();
 
-  /// The scaffold for the language of [spec].
-  factory Scaffold.forSpec(RepoSpec spec) => switch (spec.language) {
-    RepoLanguage.dart => const DartScaffold(),
-    RepoLanguage.typescript => const TsScaffold(),
-  };
+  /// The scaffold for the language of [spec]; [dartSdk] and [nodeMajor]
+  /// are the versions of the tools that will build the package.
+  factory Scaffold.forSpec(RepoSpec spec, {String? dartSdk, int? nodeMajor}) =>
+      switch (spec.language) {
+        RepoLanguage.dart => DartScaffold(sdkVersion: dartSdk),
+        RepoLanguage.typescript => TsScaffold(nodeMajor: nodeMajor),
+      };
 
   // ...........................................................................
   /// Writes every file of the skeleton into [directory].
@@ -40,15 +42,5 @@ abstract class Scaffold {
         .map((part) => part[0].toUpperCase() + part.substring(1))
         .join();
     return RegExp('^[0-9]').hasMatch(pascal) ? 'Repo$pascal' : pascal;
-  }
-
-  // ...........................................................................
-  /// [text] as a single-quoted Dart or TypeScript string literal.
-  static String quoted(String text) {
-    final escaped = text
-        .replaceAll(r'\', r'\\')
-        .replaceAll("'", r"\'")
-        .replaceAll(r'$', r'\$');
-    return "'$escaped'";
   }
 }

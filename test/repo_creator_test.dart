@@ -7,7 +7,10 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:gg_console_colors/gg_console_colors.dart';
 import 'package:gg_create_repo/gg_create_repo.dart';
+import 'package:gg_create_repo/src/github.dart';
+import 'package:gg_create_repo/src/tools.dart';
 import 'package:gg_log/gg_log.dart';
 import 'package:gg_process/gg_process.dart';
 import 'package:path/path.dart' as p;
@@ -21,6 +24,9 @@ class _Processes extends GgProcessWrapper {
 
   /// How often `git push` fails before it succeeds.
   int failingPushes = 0;
+
+  /// What a failing push reports.
+  String pushError = 'fatal: Could not resolve host: github.com';
 
   /// Executables that fail.
   final failing = <String>{};
@@ -37,15 +43,19 @@ class _Processes extends GgProcessWrapper {
     Encoding? stderrEncoding,
   }) async {
     calls.add('$executable ${arguments.join(' ')}');
+    if (failing.contains(executable)) {
+      return ProcessResult(0, 1, '', '$executable failed');
+    }
     if (executable == 'git') {
       if (arguments.first == 'push' && failingPushes > 0) {
         failingPushes--;
-        return ProcessResult(0, 1, '', 'network down');
+        return ProcessResult(0, 1, '', pushError);
       }
       return Process.run(
         'git',
         arguments,
         workingDirectory: workingDirectory,
+        environment: gitIdentity,
         stdoutEncoding: utf8,
       );
     }
@@ -56,18 +66,28 @@ class _Processes extends GgProcessWrapper {
   }
 }
 
+/// The identity of the commits the tests make; CI has none of its own.
+const gitIdentity = {
+  'GIT_AUTHOR_NAME': 'Test',
+  'GIT_AUTHOR_EMAIL': 'test@example.com',
+  'GIT_COMMITTER_NAME': 'Test',
+  'GIT_COMMITTER_EMAIL': 'test@example.com',
+};
+
 /// GitHub without the network: a local bare repository is the remote.
 class _GitHub extends GitHub {
   _GitHub(this.bare);
 
   final Directory bare;
   RemoteState remoteState = RemoteState.missing;
+  bool remoteIsPrivate = false;
   bool mergeSettingsFail = false;
   final created = <String>[];
   final merged = <String>[];
 
   @override
-  Future<RemoteState> state(String slug) async => remoteState;
+  Future<RemoteRepo> remote(String slug) async =>
+      RemoteRepo(remoteState, isPrivate: remoteIsPrivate);
 
   @override
   Future<void> create(RepoSpec spec) async {
@@ -121,6 +141,7 @@ void main() {
     'git',
     args,
     workingDirectory: (at ?? dir).path,
+    environment: gitIdentity,
   ).stdout.toString().trim();
 
   setUp(() {
@@ -146,7 +167,11 @@ void main() {
             File(p.join(dir.path, '.gg', 'gg.json'))
               ..parent.createSync(recursive: true)
               ..writeAsStringSync('{}'),
-      ).create(spec: spec, directory: dir, host: host);
+      ).create(
+        state: CreateRepoState(spec: spec),
+        directory: dir,
+        host: host,
+      );
 
       expect(File(p.join(dir.path, 'pubspec.yaml')).existsSync(), true);
       expect(File(p.join(dir.path, 'LICENSE')).existsSync(), true);
@@ -182,7 +207,7 @@ void main() {
         state.markDone(step, dir);
       }
 
-      await creator().create(spec: spec, directory: dir, host: host);
+      await creator().create(state: state, directory: dir, host: host);
 
       expect(messages.first, contains('Write the skeleton (done before)'));
       expect(processes.calls.where((c) => c.startsWith('dart')), isEmpty);
@@ -205,7 +230,11 @@ void main() {
           ..parent.createSync(recursive: true)
           ..writeAsStringSync('{"dnaJiraPrefix": "ACM"}');
 
-        await creator().create(spec: spec, directory: dir, host: host);
+        await creator().create(
+          state: CreateRepoState(spec: spec),
+          directory: dir,
+          host: host,
+        );
 
         expect(dnaCalls, [
           ['init', '--target', dir.path, '--language', 'typescript'],
@@ -222,7 +251,11 @@ void main() {
         final spec = RepoSpec.example(vars: {'dnaCompany': 'Acme'});
         dir = host.targetDir(spec);
 
-        await creator().create(spec: spec, directory: dir, host: host);
+        await creator().create(
+          state: CreateRepoState(spec: spec),
+          directory: dir,
+          host: host,
+        );
 
         final file = File(p.join(dir.path, 'dna', '_vars.json'));
         expect(jsonDecode(file.readAsStringSync()), {'dnaCompany': 'Acme'});
@@ -245,7 +278,11 @@ void main() {
         final spec = RepoSpec.example(dnaLayers: []);
         dir = host.targetDir(spec);
 
-        await creator().create(spec: spec, directory: dir, host: host);
+        await creator().create(
+          state: CreateRepoState(spec: spec),
+          directory: dir,
+          host: host,
+        );
 
         expect(gitHub.created, isEmpty);
         expect(messages.join('\n'), contains('Using the empty repository'));
@@ -257,7 +294,11 @@ void main() {
         dir = host.targetDir(spec);
 
         await expectLater(
-          creator().create(spec: spec, directory: dir, host: host),
+          creator().create(
+            state: CreateRepoState(spec: spec),
+            directory: dir,
+            host: host,
+          ),
           throwsA(
             isA<Exception>().having(
               (e) => e.toString(),
@@ -281,7 +322,11 @@ void main() {
         git(['init', '--initial-branch=main']);
         git(['remote', 'add', 'origin', 'https://example.com/x.git']);
 
-        await creator().create(spec: spec, directory: dir, host: host);
+        await creator().create(
+          state: CreateRepoState(spec: spec),
+          directory: dir,
+          host: host,
+        );
 
         expect(delays, [
           const Duration(seconds: 2),
@@ -296,7 +341,11 @@ void main() {
         dir = host.targetDir(spec);
 
         await expectLater(
-          creator().create(spec: spec, directory: dir, host: host),
+          creator().create(
+            state: CreateRepoState(spec: spec),
+            directory: dir,
+            host: host,
+          ),
           throwsA(isA<Exception>()),
         );
         expect(delays, hasLength(2));
@@ -312,7 +361,11 @@ void main() {
           ..parent.createSync(recursive: true)
           ..writeAsStringSync('');
 
-        await creator().create(spec: spec, directory: dir, host: host);
+        await creator().create(
+          state: CreateRepoState(spec: spec),
+          directory: dir,
+          host: host,
+        );
 
         final script = p.join('scripts', 'setup-github-repo.js');
         expect(
@@ -330,9 +383,16 @@ void main() {
           ..parent.createSync(recursive: true)
           ..writeAsStringSync('');
 
-        await creator().create(spec: spec, directory: dir, host: host);
+        await creator().create(
+          state: CreateRepoState(spec: spec),
+          directory: dir,
+          host: host,
+        );
 
-        expect(messages.join('\n'), contains('could not be set up'));
+        final log = messages.join('\n');
+        expect(log, contains('setup script of the DNA failed'));
+        expect(log, contains('Only the merge settings were applied'));
+        expect(gitHub.merged, ['ggsuite/gg_example_repo']);
         expect(host.handedOver, hasLength(1));
       });
 
@@ -341,15 +401,81 @@ void main() {
         final spec = RepoSpec.example(dnaLayers: []);
         dir = host.targetDir(spec);
 
-        await creator().create(spec: spec, directory: dir, host: host);
+        await creator().create(
+          state: CreateRepoState(spec: spec),
+          directory: dir,
+          host: host,
+        );
 
         expect(messages.join('\n'), contains('An admin of ggsuite'));
       });
     });
 
     // #########################################################################
-    test('uses the real tools by default', () {
-      expect(RepoCreator(ggLog: (_) {}), isA<RepoCreator>());
+    test('writes the state before the first step runs', () async {
+      processes.failing.add('git');
+      final spec = RepoSpec.example(dnaLayers: []);
+      dir = host.targetDir(spec);
+
+      await expectLater(
+        creator().create(
+          state: CreateRepoState(spec: spec),
+          directory: dir,
+          host: host,
+        ),
+        throwsA(isA<Exception>()),
+      );
+
+      final state = CreateRepoState.load(dir)!;
+      expect(state.spec.slug, spec.slug);
+      expect(state.done, isEmpty);
+    });
+
+    test('does not retry a push that failed for another reason', () async {
+      processes
+        ..failingPushes = 1
+        ..pushError = '! [rejected] main -> main (fetch first)';
+      final spec = RepoSpec.example(dnaLayers: []);
+      dir = host.targetDir(spec);
+
+      await expectLater(
+        creator().create(
+          state: CreateRepoState(spec: spec),
+          directory: dir,
+          host: host,
+        ),
+        throwsA(isA<Exception>()),
+      );
+      expect(delays, isEmpty);
+    });
+
+    test('refuses an empty repository of the other visibility', () async {
+      gitHub
+        ..remoteState = RemoteState.empty
+        ..remoteIsPrivate = true;
+      final spec = RepoSpec.example(dnaLayers: []);
+      dir = host.targetDir(spec);
+
+      await expectLater(
+        creator().create(
+          state: CreateRepoState(spec: spec),
+          directory: dir,
+          host: host,
+        ),
+        throwsA(
+          isA<Exception>().having(
+            (e) => rmConsoleColors('$e'),
+            'message',
+            contains('visibility of the empty'),
+          ),
+        ),
+      );
+    });
+
+    test('has an example on the real tools', () {
+      final example = RepoCreator.example();
+      expect(example, isA<RepoCreator>());
+      example.ggLog('logged nowhere');
     });
   });
 }

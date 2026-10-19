@@ -10,54 +10,9 @@ import 'package:args/command_runner.dart';
 import 'package:gg_console_colors/gg_console_colors.dart';
 import 'package:gg_create_repo/gg_create_repo.dart';
 import 'package:gg_interact/gg_interact.dart';
+import 'package:mocktail/mocktail.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
-
-/// Returns [spec] and remembers the options it got.
-class _Collector extends SpecCollector {
-  _Collector(this.spec, {this.didAsk = false}) : super(ggLog: (_) {});
-
-  final RepoSpec spec;
-  final bool didAsk;
-  RepoOptions? options;
-
-  @override
-  Future<RepoSpec> collect(RepoOptions options, RepoHost host) async {
-    this.options = options;
-    return spec;
-  }
-
-  @override
-  bool get asked => didAsk;
-}
-
-/// Answers with fixed findings.
-class _Preflight extends Preflight {
-  _Preflight([this.findings = const []]);
-
-  final List<Finding> findings;
-  RepoSpec? checked;
-
-  @override
-  Future<List<Finding>> run(RepoSpec spec, RepoHost host) async {
-    checked = spec;
-    return findings;
-  }
-}
-
-/// Remembers what it was asked to create.
-class _Creator extends RepoCreator {
-  _Creator() : super(ggLog: (_) {});
-
-  final created = <String>[];
-
-  @override
-  Future<void> create({
-    required RepoSpec spec,
-    required Directory directory,
-    required RepoHost host,
-  }) async => created.add('${spec.slug} ${directory.path}');
-}
 
 /// Answers every confirmation with [yes].
 class _Prompts extends GgPrompts {
@@ -96,32 +51,55 @@ class _TicketHost extends StandaloneHost {
 void main() {
   late Directory root;
   late List<String> messages;
-  late _Creator creator;
+  late MockSpecCollector collector;
+  late MockPreflight preflight;
+  late MockRepoCreator creator;
+
+  setUpAll(() {
+    registerFallbackValue(const RepoOptions());
+    registerFallbackValue(StandaloneHost.example());
+    registerFallbackValue(RepoSpec.example());
+    registerFallbackValue(CreateRepoState.example());
+    registerFallbackValue(Directory.systemTemp);
+  });
+
+  /// The collector answers [spec], the preflight [findings].
+  void answer({
+    RepoSpec? spec,
+    bool asked = false,
+    List<Finding> findings = const [],
+  }) {
+    when(
+      () => collector.collect(any(), any()),
+    ).thenAnswer((_) async => (spec: spec ?? RepoSpec.example(), asked: asked));
+    when(() => preflight.run(any(), any(), resumes: any(named: 'resumes')))
+        .thenAnswer((_) async => findings);
+  }
 
   setUp(() {
     root = Directory.systemTemp.createTempSync('create_repo_command_');
     messages = [];
-    creator = _Creator();
+    collector = MockSpecCollector();
+    preflight = MockPreflight();
+    creator = MockRepoCreator();
+    when(
+      () => creator.create(
+        state: any(named: 'state'),
+        directory: any(named: 'directory'),
+        host: any(named: 'host'),
+      ),
+    ).thenAnswer((_) async {});
+    answer();
   });
 
   tearDown(() => root.deleteSync(recursive: true));
 
-  Future<void> run(
-    List<String> args, {
-    RepoSpec? spec,
-    bool asked = false,
-    List<Finding> findings = const [],
-    GgPrompts? prompts,
-    HostFactory? host,
-    _Collector? collector,
-    _Preflight? preflight,
-  }) {
-    final command = CreateRepo(
+  Future<void> run(List<String> args, {GgPrompts? prompts, HostFactory? host}) {
+    final command = CreateRepo.example(
       ggLog: (m) => messages.add(rmConsoleColors(m)),
       host: host,
-      collector:
-          collector ?? _Collector(spec ?? RepoSpec.example(), didAsk: asked),
-      preflight: preflight ?? _Preflight(findings),
+      collector: collector,
+      preflight: preflight,
       creator: creator,
       prompts: prompts,
     );
@@ -134,19 +112,51 @@ void main() {
   String target([String name = 'gg_example_repo']) =>
       p.join(p.normalize(p.absolute(root.path)), name);
 
+  ({CreateRepoState state, Directory directory}) created() {
+    final captured = verify(
+      () => creator.create(
+        state: captureAny(named: 'state'),
+        directory: captureAny(named: 'directory'),
+        host: any(named: 'host'),
+      ),
+    ).captured;
+    return (
+      state: captured[0] as CreateRepoState,
+      directory: captured[1] as Directory,
+    );
+  }
+
+  void expectNothingCreated() => verifyNever(
+    () => creator.create(
+      state: any(named: 'state'),
+      directory: any(named: 'directory'),
+      host: any(named: 'host'),
+    ),
+  );
+
+  RepoOptions collectedOptions() =>
+      verify(() => collector.collect(captureAny(), any())).captured.single
+          as RepoOptions;
+
+  Matcher throwsMentioning(List<String> parts) => throwsA(
+    isA<Exception>().having(
+      (e) => rmConsoleColors('$e'),
+      'message',
+      allOf([for (final part in parts) contains(part)]),
+    ),
+  );
+
   group('CreateRepo', () {
     // #########################################################################
     test('passes every option on to the collector', () async {
-      final collector = _Collector(RepoSpec.example());
-
       await run([
         ...['-n', 'x', '-l', 'ts', '-g', 'org', '-d', 'desc'],
         ...['--scope', 's', '--private', '--no-cli', '--example'],
         ...['--flutter', '--dna', 'a', '--dna', 'b', '--without-dna'],
         ...['--var', 'k=v', '-i'],
-      ], collector: collector);
+      ]);
 
-      final o = collector.options!;
+      final o = collectedOptions();
       expect(
         [o.name, o.language, o.org, o.description, o.npmScope],
         ['x', 'ts', 'org', 'desc', 's'],
@@ -162,9 +172,8 @@ void main() {
     });
 
     test('leaves unset flags null', () async {
-      final collector = _Collector(RepoSpec.example());
-      await run([], collector: collector);
-      final o = collector.options!;
+      await run([]);
+      final o = collectedOptions();
       expect([o.isPrivate, o.cli, o.example, o.flutter], everyElement(null));
     });
 
@@ -172,26 +181,27 @@ void main() {
     test('creates the repository in the output folder', () async {
       await run([]);
 
-      expect(creator.created, ['ggsuite/gg_example_repo ${target()}']);
+      final call = created();
+      expect(call.state.spec.slug, 'ggsuite/gg_example_repo');
+      expect(call.state.done, isEmpty);
+      expect(call.directory.path, target());
       final log = messages.join('\n');
-      expect(log, contains('ggsuite/gg_example_repo'));
       expect(log, contains('gg_example_repo 0.0.1'));
-      expect(log, contains('dna_ggsuite'));
+      expect(log, contains('DNA:        dna_ggsuite'));
       expect(log, contains('Dart, example, public'));
       expect(log, contains('Created https://github.com/ggsuite/'));
     });
 
     test('shows the kind of package and what follows', () async {
-      await run(
-        [],
+      answer(
         spec: RepoSpec.example(
           flutter: true,
           cli: true,
           isPrivate: true,
           dnaLayers: [],
         ),
-        host: (args) => _TicketHost(root),
       );
+      await run([], host: (args) => _TicketHost(root));
 
       final log = messages.join('\n');
       expect(log, contains('Dart, Flutter, CLI, example, private'));
@@ -200,85 +210,141 @@ void main() {
     });
 
     // #########################################################################
-    test('continues the spec of an earlier run', () async {
-      final earlier = RepoSpec.example(description: 'x' * 70);
-      Directory(target()).createSync();
-      CreateRepoState(spec: earlier)
-          .markDone(CreateStep.scaffold, Directory(target()));
-      final preflight = _Preflight();
+    group('with an earlier run in the folder', () {
+      void earlierRun(RepoSpec spec) {
+        Directory(target()).createSync();
+        CreateRepoState(
+          spec: spec,
+          done: {CreateStep.scaffold},
+        ).save(Directory(target()));
+      }
 
-      await run([], preflight: preflight);
+      test('continues it and takes the variables given now', () async {
+        earlierRun(RepoSpec.example(vars: {'a': '1', 'b': '2'}));
+        answer(spec: RepoSpec.example(vars: {'b': '3'}));
 
-      expect(preflight.checked!.description, 'x' * 70);
+        await run([]);
+
+        final state = created().state;
+        expect(state.done, {CreateStep.scaffold});
+        expect(state.spec.vars, {'a': '1', 'b': '3'});
+        verify(() => preflight.run(any(), any(), resumes: true)).called(1);
+      });
+
+      test('refuses options that contradict it', () async {
+        earlierRun(RepoSpec.example(description: 'x' * 70));
+        answer(
+          spec: RepoSpec.example(
+            description: 'y' * 70,
+            isPrivate: true,
+            cli: true,
+            dnaLayers: ['other'],
+          ),
+        );
+
+        await expectLater(
+          run(['-d', 'y' * 70, '--private', '--cli', '--dna', 'other']),
+          throwsMentioning(['description', 'private', 'cli', 'dna']),
+        );
+      });
+
+      test('compares every option it was started with', () async {
+        earlierRun(
+          RepoSpec.example(language: RepoLanguage.typescript, npmScope: 'a'),
+        );
+        answer(
+          spec: RepoSpec.example(
+            npmScope: 'b',
+            example: false,
+            flutter: true,
+            dnaLayers: [],
+          ),
+        );
+
+        await expectLater(
+          run([
+            ...['-l', 'dart', '--scope', 'b', '--no-example', '--flutter'],
+            '--without-dna',
+          ]),
+          throwsMentioning(['language', 'scope', 'example', 'flutter', 'dna']),
+        );
+      });
+
+      test('ignores options that match it', () async {
+        earlierRun(RepoSpec.example());
+        await run(['-d', RepoSpec.example().description, '--no-cli']);
+        expect(created().state.spec.slug, 'ggsuite/gg_example_repo');
+      });
+
+      test('refuses an earlier run of another repository', () async {
+        earlierRun(RepoSpec.example(org: 'other'));
+        await expectLater(run([]), throwsMentioning(['other/gg_example_repo']));
+      });
     });
 
     // #########################################################################
     test('logs the findings and stops at an error', () async {
-      await expectLater(
-        run(
-          [],
-          findings: [
-            const Finding(FindingLevel.warning, 'careful'),
-            const Finding(FindingLevel.info, 'fyi'),
-            const Finding(FindingLevel.error, 'broken'),
-          ],
-        ),
-        throwsA(
-          isA<Exception>().having(
-            (e) => e.toString(),
-            'message',
-            contains('Nothing was created'),
-          ),
-        ),
+      answer(
+        findings: [
+          const Finding(FindingLevel.warning, 'careful'),
+          const Finding(FindingLevel.info, 'fyi'),
+          const Finding(FindingLevel.error, 'broken'),
+        ],
       );
+
+      await expectLater(run([]), throwsMentioning(['Nothing was created']));
 
       final log = messages.join('\n');
       expect(log, contains('! careful'));
       expect(log, contains('· fyi'));
       expect(log, contains('✗ broken'));
-      expect(creator.created, isEmpty);
+      expectNothingCreated();
     });
 
     // #########################################################################
     test('creates nothing in a dry run', () async {
       await run(['--dry-run']);
-
       expect(messages.last, contains('Dry run'));
-      expect(creator.created, isEmpty);
+      expectNothingCreated();
     });
 
     // #########################################################################
     group('after questions', () {
       test('creates when the user confirms', () async {
+        answer(asked: true);
         final prompts = _Prompts(true);
-        await run([], asked: true, prompts: prompts);
+        await run([], prompts: prompts);
         expect(prompts.confirmations, 1);
-        expect(creator.created, hasLength(1));
+        created();
       });
 
       test('creates nothing when the user declines', () async {
-        await run([], asked: true, prompts: _Prompts(false));
+        answer(asked: true);
+        await run([], prompts: _Prompts(false));
         expect(messages.last, contains('Nothing was created'));
-        expect(creator.created, isEmpty);
+        expectNothingCreated();
       });
 
       test('does not ask with --yes', () async {
+        answer(asked: true);
         final prompts = _Prompts(false);
-        await run(['-y'], asked: true, prompts: prompts);
+        await run(['-y'], prompts: prompts);
         expect(prompts.confirmations, 0);
-        expect(creator.created, hasLength(1));
+        created();
       });
 
       test('asks with the current prompts by default', () async {
+        answer(asked: true);
         GgPrompts.current = _Prompts(true);
         addTearDown(() => GgPrompts.current = null);
-        await run([], asked: true);
-        expect(creator.created, hasLength(1));
+        await run([]);
+        created();
       });
     });
 
     // #########################################################################
     test('has working defaults', () {
+      CreateRepo.example().ggLog('logged nowhere');
       final command = CreateRepo(ggLog: (_) {});
       expect(command.name, 'create-repo');
       expect(command.description, contains('Dart or TypeScript'));

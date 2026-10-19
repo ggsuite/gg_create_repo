@@ -14,8 +14,12 @@ import 'scaffold.dart';
 
 /// The skeleton of a Dart or Flutter package in the style of the gg suite.
 class DartScaffold extends Scaffold {
-  /// Constructor
+  /// Constructor; [sdkVersion] is the Dart that will build the package.
   const DartScaffold({this._sdkVersion});
+
+  /// A scaffold for Dart 3.9.2; tests pass what they care about.
+  factory DartScaffold.example({String? sdkVersion}) =>
+      DartScaffold(sdkVersion: sdkVersion ?? '3.9.2');
 
   // ...........................................................................
   @override
@@ -54,6 +58,28 @@ class DartScaffold extends Scaffold {
     ];
     await tools.run(tool, ['pub', 'add', ...packages], directory: directory);
     await tools.run('dart', ['format', '.'], directory: directory);
+  }
+
+  // ...........................................................................
+  /// [text] as `///` lines of at most 80 characters, without HTML tags.
+  static String docComment(String text) {
+    const prefix = '/// ';
+    final words = text
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty);
+    final lines = <String>[];
+    var line = '';
+    for (final word in words) {
+      if (line.isNotEmpty && prefix.length + line.length + word.length >= 80) {
+        lines.add(line);
+        line = '';
+      }
+      line = line.isEmpty ? word : '$line $word';
+    }
+    lines.add(line);
+    return lines.map((l) => '$prefix$l\n').join();
   }
 
   // ...........................................................................
@@ -98,11 +124,12 @@ class DartScaffold extends Scaffold {
   static const _t = '_test.dart';
 
   // ...........................................................................
-  /// `major.minor.0` of the Dart SDK that runs gg_create_repo.
+  /// `major.minor.0` of the building SDK; `-0` keeps a pre-release in.
   String get _sdk {
-    final version = _sdkVersion ?? Platform.version;
-    final parts = version.split(RegExp(r'[.\s]'));
-    return '${parts[0]}.${parts[1]}.0';
+    final version = (_sdkVersion ?? Platform.version).split(' ').first;
+    final parts = version.split('.');
+    final preRelease = version.contains('-') ? '-0' : '';
+    return '${parts[0]}.${parts[1]}.0$preRelease';
   }
 
   // ...........................................................................
@@ -119,7 +146,7 @@ class DartScaffold extends Scaffold {
   // ...........................................................................
   String _library(RepoSpec spec) =>
       '${CommonFiles.fileHeader(spec)}\n'
-      '/// ${spec.description}\n'
+      '${docComment(spec.description)}'
       'library;\n\n'
       "export 'src/${spec.name}.dart';\n"
       '${spec.cli ? "export 'src/commands/my_command.dart';\n" : ''}';
@@ -192,7 +219,9 @@ class $c extends Command<dynamic> {
   final name = '${spec.name}';
 
   @override
-  final description = 'The command line interface of ${spec.name}.';
+  final description =
+      'The command line interface of '
+      '${spec.name}.';
 
   /// The log function.
   final GgLog ggLog;

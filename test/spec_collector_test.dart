@@ -4,14 +4,18 @@
 // Use of this source code is governed by terms that can be
 // found in the LICENSE file in the root of this package.
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:gg_console_colors/gg_console_colors.dart';
 import 'package:gg_create_repo/gg_create_repo.dart';
+import 'package:gg_create_repo/src/github.dart';
+import 'package:gg_create_repo/src/registry.dart';
 import 'package:gg_interact/gg_interact.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 // .............................................................................
@@ -49,19 +53,27 @@ class _ScriptedPrompts extends GgPrompts {
 }
 
 // .............................................................................
-/// A folder host with a preset org and DNA candidates.
+/// A folder host with a preset org, DNA candidates and local layers.
 class _Host extends StandaloneHost {
-  _Host({super.orgs = const [], this.preset, this.candidates = const []})
-    : super(outputDir: Directory.systemTemp);
+  _Host({
+    super.orgs = const [],
+    this.preset,
+    this.candidates = const [],
+    this.layers = const {},
+  }) : super(outputDir: Directory.systemTemp);
 
   final String? preset;
   final List<DnaCandidate> candidates;
+  final Map<String, Directory> layers;
 
   @override
   String? get presetOrg => preset;
 
   @override
   List<DnaCandidate> dnaCandidates(RepoSpec spec) => candidates;
+
+  @override
+  Directory? layerDir(String layer) => layers[layer];
 }
 
 void main() {
@@ -71,6 +83,8 @@ void main() {
 
   const description =
       'An example repository created by gg_create_repo for the tests.';
+  const pubDnaGgsuite = 'https://pub.dev/api/packages/dna_ggsuite';
+  final ggsuiteDna = DnaCandidate.example();
 
   SpecCollector collector(_ScriptedPrompts prompts, {bool terminal = true}) =>
       SpecCollector(
@@ -86,6 +100,27 @@ void main() {
         ),
       );
 
+  Future<RepoSpec> spec(
+    RepoOptions options, {
+    _ScriptedPrompts? prompts,
+    _Host? host,
+    bool terminal = true,
+  }) async {
+    final collected = await collector(
+      prompts ?? _ScriptedPrompts([]),
+      terminal: terminal,
+    ).collect(options, host ?? _Host());
+    return collected.spec;
+  }
+
+  Matcher throwsWith(String text) => throwsA(
+    isA<Exception>().having(
+      (e) => rmConsoleColors('$e'),
+      'message',
+      contains(text),
+    ),
+  );
+
   setUp(() {
     gitHub = MockGitHub();
     inRegistry = {};
@@ -96,15 +131,15 @@ void main() {
 
   tearDown(() => GgPrompts.current = null);
 
-  const pubDnaGgsuite = 'https://pub.dev/api/packages/dna_ggsuite';
-
   group('SpecCollector', () {
     group('collect()', () {
       test('takes given options without asking', () async {
         final prompts = _ScriptedPrompts([]);
-        final c = collector(prompts, terminal: false);
 
-        final spec = await c.collect(RepoOptions.example(), _Host());
+        final (:spec, :asked) = await collector(
+          prompts,
+          terminal: false,
+        ).collect(RepoOptions.example(), _Host());
 
         expect(spec.name, 'gg_example_repo');
         expect(spec.language, RepoLanguage.dart);
@@ -116,40 +151,67 @@ void main() {
         expect(spec.flutter, isFalse);
         expect(spec.dnaLayers, ['dna_ggsuite']);
         expect(spec.vars, isEmpty);
-        expect(c.asked, isFalse);
+        expect(asked, isFalse);
         expect(prompts.questions, isEmpty);
       });
 
       test('uses GgPrompts.current without own prompts', () async {
         final prompts = _ScriptedPrompts([1]);
         GgPrompts.current = prompts;
-        final c = SpecCollector(
-          ggLog: messages.add,
-          hasTerminal: () => true,
-          gitHub: gitHub,
-        );
-        final spec = await c.collect(
+        final collected =
+            await SpecCollector.example(
+              ggLog: messages.add,
+              hasTerminal: () => true,
+              gitHub: gitHub,
+            ).collect(
+              const RepoOptions(
+                name: 'my-lib',
+                org: 'ggsuite',
+                description: 'x',
+                withoutDna: true,
+              ),
+              _Host(),
+            );
+        expect(collected.spec.language, RepoLanguage.typescript);
+        expect(prompts.questions, ['Which language?']);
+      });
+
+      test('example() collects given options with the defaults', () async {
+        final collected = await SpecCollector.example().collect(
           const RepoOptions(
             name: 'my-lib',
+            language: 'ts',
             org: 'ggsuite',
             description: 'x',
             withoutDna: true,
           ),
           _Host(),
         );
-        expect(spec.language, RepoLanguage.typescript);
-        expect(prompts.questions, ['Which language?']);
+        expect(collected.spec.packageName, '@ggsuite/my-lib');
+      });
+
+      test('example() logs nowhere by default', () async {
+        final prompts = _ScriptedPrompts(['Bad', 'my-lib']);
+        final collected =
+            await SpecCollector.example(
+              prompts: prompts,
+              hasTerminal: () => true,
+            ).collect(
+              const RepoOptions(
+                language: 'ts',
+                org: 'ggsuite',
+                description: 'x',
+                withoutDna: true,
+              ),
+              _Host(),
+            );
+        expect(collected.spec.name, 'my-lib');
+        expect(prompts.questions, hasLength(2));
       });
 
       group('refuses invalid options', () {
-        Future<void> refuse(RepoOptions options, String reason) async {
-          await expectLater(
-            collector(_ScriptedPrompts([])).collect(options, _Host()),
-            throwsA(
-              isA<Exception>().having((e) => '$e', 'message', contains(reason)),
-            ),
-          );
-        }
+        Future<void> refuse(RepoOptions options, String reason) =>
+            expectLater(spec(options), throwsWith(reason));
 
         test('language, name, org and description', () async {
           await refuse(
@@ -220,9 +282,9 @@ void main() {
 
       test('fails headless with the option to pass', () async {
         await expectLater(
-          collector(_ScriptedPrompts([]), terminal: false).collect(
+          spec(
             const RepoOptions(language: 'dart', org: 'ggsuite'),
-            _Host(),
+            terminal: false,
           ),
           throwsA(
             isA<Exception>().having(
@@ -242,9 +304,8 @@ void main() {
           'good_name',
           description,
         ]);
-        final c = collector(prompts);
 
-        final spec = await c.collect(
+        final (:spec, :asked) = await collector(prompts).collect(
           const RepoOptions(withoutDna: true),
           _Host(orgs: ['ggsuite']),
         );
@@ -253,7 +314,7 @@ void main() {
         expect(spec.org, 'tssuite');
         expect(spec.name, 'good_name');
         expect(spec.description, description);
-        expect(c.asked, isTrue);
+        expect(asked, isTrue);
         expect(prompts.questions, [
           'Which language?',
           'Organization',
@@ -267,7 +328,10 @@ void main() {
           'ada',
           'Another organization or user',
         ]);
-        expect(messages.single, contains('no valid Dart package name'));
+        expect(
+          messages.map(rmConsoleColors).single,
+          contains('no valid Dart package name'),
+        );
       });
 
       group('the organization', () {
@@ -285,8 +349,8 @@ void main() {
 
         test('can be entered when it is not in the menu', () async {
           final prompts = _ScriptedPrompts([2, 'acme']);
-          final spec = await collector(prompts).collect(noOrg(), _Host());
-          expect(spec.org, 'acme');
+          final result = await spec(noOrg(), prompts: prompts);
+          expect(result.org, 'acme');
           expect(prompts.questions.last, 'GitHub organization or user');
         });
 
@@ -294,25 +358,40 @@ void main() {
           when(() => gitHub.orgs()).thenAnswer((_) async => []);
           when(() => gitHub.login()).thenAnswer((_) async => null);
           final prompts = _ScriptedPrompts(['acme']);
-          final spec = await collector(prompts).collect(noOrg(), _Host());
-          expect(spec.org, 'acme');
+          final result = await spec(noOrg(), prompts: prompts);
+          expect(result.org, 'acme');
           expect(prompts.questions, ['GitHub organization or user']);
         });
 
         test('is the preset of the host', () async {
           final prompts = _ScriptedPrompts([]);
-          final spec = await collector(prompts)
-              .collect(noOrg(), _Host(preset: 'rljson'));
-          expect(spec.org, 'rljson');
+          final result = await spec(
+            noOrg(),
+            prompts: prompts,
+            host: _Host(preset: 'rljson'),
+            terminal: false,
+          );
+          expect(result.org, 'rljson');
           expect(prompts.questions, isEmpty);
         });
 
         test('offers the preset first when interactive', () async {
           final prompts = _ScriptedPrompts([0]);
-          final spec = await collector(prompts)
-              .collect(noOrg(interactive: true), _Host(preset: 'rljson'));
-          expect(spec.org, 'rljson');
+          final result = await spec(
+            noOrg(interactive: true),
+            prompts: prompts,
+            host: _Host(preset: 'rljson'),
+          );
+          expect(result.org, 'rljson');
           expect(prompts.options.single.first, 'rljson');
+        });
+
+        test('needs a terminal for the menu', () async {
+          await expectLater(
+            spec(noOrg(), terminal: false),
+            throwsWith('--org'),
+          );
+          verifyNever(() => gitHub.orgs());
         });
       });
 
@@ -330,11 +409,11 @@ void main() {
 
         test('asks visibility, CLI and example', () async {
           final prompts = _ScriptedPrompts([1, 0, 1]);
-          final spec = await collector(prompts).collect(all(), _Host());
-          expect(spec.isPrivate, isTrue);
-          expect(spec.cli, isTrue);
-          expect(spec.example, isFalse);
-          expect(spec.flutter, isFalse);
+          final result = await spec(all(), prompts: prompts);
+          expect(result.isPrivate, isTrue);
+          expect(result.cli, isTrue);
+          expect(result.example, isFalse);
+          expect(result.flutter, isFalse);
           expect(prompts.questions, [
             'Visibility',
             'With a CLI?',
@@ -344,44 +423,34 @@ void main() {
 
         test('asks for Flutter without a CLI', () async {
           final prompts = _ScriptedPrompts([0, 1, 0, 0]);
-          final spec = await collector(prompts).collect(all(), _Host());
-          expect(spec.isPrivate, isFalse);
-          expect(spec.cli, isFalse);
-          expect(spec.example, isTrue);
-          expect(spec.flutter, isTrue);
+          final result = await spec(all(), prompts: prompts);
+          expect(result.isPrivate, isFalse);
+          expect(result.cli, isFalse);
+          expect(result.example, isTrue);
+          expect(result.flutter, isTrue);
           expect(prompts.questions.last, 'A Flutter package?');
         });
 
         test('asks for the npm scope of TypeScript', () async {
           final prompts = _ScriptedPrompts([0, 'acme']);
-          final spec = await collector(prompts)
-              .collect(all(language: 'ts'), _Host());
-          expect(spec.npmScope, 'acme');
-          expect(spec.packageName, '@acme/my-lib');
+          final result = await spec(all(language: 'ts'), prompts: prompts);
+          expect(result.npmScope, 'acme');
+          expect(result.packageName, '@acme/my-lib');
           expect(prompts.defaults.last, 'ggsuite');
-          expect(spec.cli, isFalse);
-          expect(spec.example, isFalse);
+          expect(result.cli, isFalse);
+          expect(result.example, isFalse);
         });
 
         test('fails headless at the first question', () async {
           await expectLater(
-            collector(
-              _ScriptedPrompts([]),
-              terminal: false,
-            ).collect(all(isPrivate: false), _Host()),
-            throwsA(
-              isA<Exception>().having(
-                (e) => '$e',
-                'message',
-                contains('With a CLI?'),
-              ),
-            ),
+            spec(all(isPrivate: false), terminal: false),
+            throwsWith('With a CLI?'),
           );
         });
       });
 
       test('takes a given npm scope', () async {
-        final spec = await collector(_ScriptedPrompts([])).collect(
+        final result = await spec(
           const RepoOptions(
             name: 'my-lib',
             language: 'ts',
@@ -390,13 +459,12 @@ void main() {
             npmScope: 'acme',
             withoutDna: true,
           ),
-          _Host(),
         );
-        expect(spec.packageName, '@acme/my-lib');
+        expect(result.packageName, '@acme/my-lib');
       });
 
       test('parses the variables', () async {
-        final spec = await collector(_ScriptedPrompts([])).collect(
+        final result = await spec(
           const RepoOptions(
             name: 'a',
             language: 'dart',
@@ -405,49 +473,47 @@ void main() {
             withoutDna: true,
             vars: ['a=1', 'b=x=y'],
           ),
-          _Host(),
         );
-        expect(spec.vars, {'a': '1', 'b': 'x=y'});
+        expect(result.vars, {'a': '1', 'b': 'x=y'});
       });
 
       group('the DNA', () {
-        RepoOptions noDna() => const RepoOptions(
+        RepoOptions noDna({List<String> vars = const []}) => RepoOptions(
           name: 'a',
           language: 'dart',
           org: 'ggsuite',
           description: description,
+          vars: vars,
         );
 
         test('is none with --without-dna', () async {
-          final spec = await collector(_ScriptedPrompts([])).collect(
+          final result = await spec(
             RepoOptions.example(dnaLayers: [], withoutDna: true),
-            _Host(),
           );
-          expect(spec.dnaLayers, isEmpty);
+          expect(result.dnaLayers, isEmpty);
         });
 
-        test('is the suggestion when headless', () async {
-          inRegistry.add(pubDnaGgsuite);
-          final spec = await collector(
-            _ScriptedPrompts([]),
+        test('is the suggestion of the host when headless', () async {
+          final result = await spec(
+            noDna(),
+            host: _Host(candidates: [ggsuiteDna]),
             terminal: false,
-          ).collect(noDna(), _Host());
-          expect(spec.dnaLayers, ['dna_ggsuite']);
+          );
+          expect(result.dnaLayers, ['dna_ggsuite']);
+        });
+
+        test('is not taken from the registry alone when headless', () async {
+          inRegistry.add(pubDnaGgsuite);
+          await expectLater(
+            spec(noDna(), terminal: false),
+            throwsWith('--dna <layer> or --without-dna'),
+          );
         });
 
         test('must be passed headless without a suggestion', () async {
           await expectLater(
-            collector(
-              _ScriptedPrompts([]),
-              terminal: false,
-            ).collect(noDna(), _Host()),
-            throwsA(
-              isA<Exception>().having(
-                (e) => '$e',
-                'message',
-                contains('--without-dna'),
-              ),
-            ),
+            spec(noDna(), terminal: false),
+            throwsWith('--without-dna'),
           );
         });
 
@@ -455,7 +521,7 @@ void main() {
           final prompts = _ScriptedPrompts([
             0, // the suggestion
             0, // add another: yes
-            1, // the candidate of the host
+            1, // the other candidate of the host
             0, // add another: yes
             2, // enter one
             '', // invalid
@@ -464,14 +530,14 @@ void main() {
           ]);
           final host = _Host(
             candidates: [
-              DnaCandidate.example(),
+              ggsuiteDna,
               DnaCandidate.example(label: 'dna_x', ref: 'git@x'),
             ],
           );
 
-          final spec = await collector(prompts).collect(noDna(), host);
+          final result = await spec(noDna(), prompts: prompts, host: host);
 
-          expect(spec.dnaLayers, ['dna_ggsuite', 'git@x', 'pkg_y']);
+          expect(result.dnaLayers, ['dna_ggsuite', 'git@x', 'pkg_y']);
           expect(prompts.options.first, [
             'dna_ggsuite (suggested)',
             'dna_x',
@@ -482,11 +548,11 @@ void main() {
           expect(messages.map(rmConsoleColors), ['Please enter a layer.']);
         });
 
-        test('stops when no further DNA is picked', () async {
+        test('offers the suggestion the registry has', () async {
           inRegistry.add(pubDnaGgsuite);
           final prompts = _ScriptedPrompts([0, 0, 2]);
-          final spec = await collector(prompts).collect(noDna(), _Host());
-          expect(spec.dnaLayers, ['dna_ggsuite']);
+          final result = await spec(noDna(), prompts: prompts);
+          expect(result.dnaLayers, ['dna_ggsuite']);
           expect(prompts.options.last, [
             'dna_ggsuite (suggested)',
             'Enter a package name or git URL',
@@ -496,8 +562,100 @@ void main() {
 
         test('can be none from the menu', () async {
           final prompts = _ScriptedPrompts([1]);
-          final spec = await collector(prompts).collect(noDna(), _Host());
-          expect(spec.dnaLayers, isEmpty);
+          final result = await spec(noDna(), prompts: prompts);
+          expect(result.dnaLayers, isEmpty);
+          expect(prompts.options.single, [
+            'Enter a package name or git URL',
+            'No DNA',
+          ]);
+        });
+
+        group('variables', () {
+          late Directory root;
+
+          /// Writes a layer with [parents] and [mustOverride] flags.
+          Directory layer(
+            String name, {
+            List<String> parents = const [],
+            Map<String, bool> mustOverride = const {},
+          }) {
+            final dir = Directory(p.join(root.path, name));
+            File(p.join(dir.path, 'dna', '_dna.json'))
+              ..createSync(recursive: true)
+              ..writeAsStringSync(
+                jsonEncode({
+                  'version': 2,
+                  'layers': parents,
+                  'mustOverride': mustOverride,
+                }),
+              );
+            return dir;
+          }
+
+          setUp(() => root = Directory.systemTemp.createTempSync('layers_'));
+          tearDown(() => root.deleteSync(recursive: true));
+
+          _Host host() => _Host(
+            candidates: [ggsuiteDna],
+            layers: {
+              'dna_base': layer('dna_base', mustOverride: {'dnaCompany': true}),
+              'dna_ggsuite': layer('dna_ggsuite', parents: ['dna_base']),
+              'dna_umbrella': layer(
+                'dna_umbrella',
+                parents: ['dna_base'],
+                mustOverride: {'dnaCompany': false},
+              ),
+            },
+          );
+
+          test('asks for the required ones', () async {
+            final prompts = _ScriptedPrompts(['', 'Acme']);
+            final result = await spec(
+              RepoOptions.example(),
+              prompts: prompts,
+              host: host(),
+            );
+            expect(result.vars, {'dnaCompany': 'Acme'});
+            expect(prompts.questions.last, 'dnaCompany (required by dna_base)');
+            expect(
+              messages.map(rmConsoleColors),
+              contains('A value is required.'),
+            );
+          });
+
+          test('takes a required one given with --var', () async {
+            final result = await spec(
+              noDna(vars: ['dnaCompany=Given']),
+              host: host(),
+              terminal: false,
+            );
+            expect(result.vars, {'dnaCompany': 'Given'});
+          });
+
+          test('fail headless with the option to pass', () async {
+            await expectLater(
+              spec(noDna(), host: host(), terminal: false),
+              throwsWith('--var dnaCompany=<value>'),
+            );
+          });
+
+          test('are not asked when a layer lifts the duty', () async {
+            final result = await spec(
+              RepoOptions.example(dnaLayers: ['dna_umbrella']),
+              host: host(),
+              terminal: false,
+            );
+            expect(result.vars, isEmpty);
+          });
+
+          test('are not asked for a layer without a local copy', () async {
+            final result = await spec(
+              RepoOptions.example(dnaLayers: ['dna_unknown']),
+              host: host(),
+              terminal: false,
+            );
+            expect(result.vars, isEmpty);
+          });
         });
       });
     });

@@ -4,11 +4,11 @@
 // Use of this source code is governed by terms that can be
 // found in the LICENSE file in the root of this package.
 
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'json_file.dart';
 import 'repo_spec.dart';
 
 /// The steps that create a repository, in the order they run.
@@ -19,7 +19,7 @@ enum CreateStep {
   /// Adds the dependencies.
   install('Install the dependencies'),
 
-  /// Commits the skeleton.
+  /// Commits the skeleton, so the DNA step finds a clean tree.
   initialCommit('Commit the skeleton'),
 
   /// Adds the DNA layers.
@@ -59,16 +59,24 @@ class CreateRepoState {
 
   // ...........................................................................
   /// The state of an earlier run in [directory], `null` if there is none.
+  /// Throws a readable error when the file cannot be read.
   static CreateRepoState? load(Directory directory) {
     final file = fileIn(directory);
     if (!file.existsSync()) return null;
-    final json = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
-    return CreateRepoState(
-      spec: RepoSpec.fromJson(json['spec'] as Map<String, dynamic>),
-      done: (json['done'] as List<dynamic>)
-          .map((name) => CreateStep.values.byName(name as String))
-          .toSet(),
-    );
+    try {
+      final json = JsonFile(file).read();
+      return CreateRepoState(
+        spec: RepoSpec.fromJson(json['spec'] as Map<String, dynamic>),
+        done: (json['done'] as List<dynamic>)
+            .map((name) => CreateStep.values.byName(name as String))
+            .toSet(),
+      );
+    } on Object catch (e) {
+      throw Exception(
+        '${file.path} cannot be read ($e). It belongs to an earlier run of '
+        'gg_create_repo; move it away to start the run anew.',
+      );
+    }
   }
 
   // ...........................................................................
@@ -77,19 +85,20 @@ class CreateRepoState {
       File(p.join(directory.path, '.gg', 'create_repo_state.json'));
 
   // ...........................................................................
+  /// Writes the state to [directory].
+  void save(Directory directory) => JsonFile(fileIn(directory)).write({
+    'spec': spec.toJson(),
+    'done': [
+      for (final step in CreateStep.values)
+        if (done.contains(step)) step.name,
+    ],
+  });
+
+  // ...........................................................................
   /// Marks [step] as done and writes the state to [directory].
   void markDone(CreateStep step, Directory directory) {
     done.add(step);
-    final file = fileIn(directory)..parent.createSync(recursive: true);
-    file.writeAsStringSync(
-      const JsonEncoder.withIndent('  ').convert({
-        'spec': spec.toJson(),
-        'done': [
-          for (final step in CreateStep.values)
-            if (done.contains(step)) step.name,
-        ],
-      }),
-    );
+    save(directory);
   }
 
   // ...........................................................................

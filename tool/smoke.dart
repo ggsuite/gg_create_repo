@@ -7,6 +7,7 @@
 import 'dart:io';
 
 import 'package:gg_create_repo/gg_create_repo.dart';
+import 'package:gg_create_repo/src/github.dart';
 
 /// Creates a real repository end to end — skeleton, `pub add`/`pnpm add`,
 /// DNA and gg checks — with a local bare repository instead of GitHub.
@@ -29,10 +30,11 @@ Future<void> main(List<String> args) async {
   );
   final host = StandaloneHost(outputDir: root);
   final bare = Directory('${root.path}/${spec.name}.git');
-  await RepoCreator(
-    ggLog: print,
-    gitHub: _LocalGitHub(bare),
-  ).create(spec: spec, directory: host.targetDir(spec), host: host);
+  await RepoCreator(ggLog: print, gitHub: _LocalGitHub(bare)).create(
+    state: CreateRepoState(spec: spec),
+    directory: host.targetDir(spec),
+    host: host,
+  );
 }
 
 /// GitHub replaced by the bare repository [bare].
@@ -42,7 +44,8 @@ class _LocalGitHub extends GitHub {
   final Directory bare;
 
   @override
-  Future<RemoteState> state(String slug) async => RemoteState.missing;
+  Future<RemoteRepo> remote(String slug) async =>
+      const RemoteRepo(RemoteState.missing);
 
   @override
   Future<void> create(RepoSpec spec) async {

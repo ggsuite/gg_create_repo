@@ -8,6 +8,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:gg_create_repo/gg_create_repo.dart';
+import 'package:gg_create_repo/src/scaffold/dart_scaffold.dart';
+import 'package:gg_create_repo/src/tools.dart';
 import 'package:gg_process/gg_process.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
@@ -40,7 +42,9 @@ void main() {
   setUp(() => dir = Directory.systemTemp.createTempSync('dart_scaffold_'));
   tearDown(() => dir.deleteSync(recursive: true));
 
-  const scaffold = DartScaffold(sdkVersion: '3.13.2 (stable) on "windows"');
+  final scaffold = DartScaffold.example(
+    sdkVersion: '3.13.2 (stable) on "windows"',
+  );
   const tricky =
       r'''Creates: "quoted" and 'single' things, costs $5 \ more, '''
       'and is long enough for pub.dev.';
@@ -168,10 +172,76 @@ void main() {
 
     group('pubspec()', () {
       test('takes the SDK that runs gg_create_repo by default', () {
-        final parts = Platform.version.split(RegExp(r'[.\s]'));
+        final version = Platform.version.split(' ').first;
+        final parts = version.split('.');
+        final pre = version.contains('-') ? '-0' : '';
         expect(
           const DartScaffold().pubspec(RepoSpec.example()),
-          contains('sdk: ">=${parts[0]}.${parts[1]}.0 <4.0.0"'),
+          contains('sdk: ">=${parts[0]}.${parts[1]}.0$pre <4.0.0"'),
+        );
+      });
+
+      test('keeps a pre-release SDK inside the constraint', () {
+        final pubspec = DartScaffold.example(sdkVersion: '3.14.0-12.0.dev')
+            .pubspec(RepoSpec.example());
+        expect(pubspec, contains('sdk: ">=3.14.0-0 <4.0.0"'));
+      });
+
+      test('example() builds with Dart 3.9.2', () {
+        expect(
+          DartScaffold.example().pubspec(RepoSpec.example()),
+          contains('sdk: ">=3.9.0 <4.0.0"'),
+        );
+      });
+    });
+
+    group('docComment()', () {
+      test('wraps a long text at 80 characters and escapes tags', () {
+        const text =
+            'Parses a Map<String, int> into a List<T> of entries, keeps '
+            'their order and reports every duplicate key it meets on the '
+            'way with the line it was found in.';
+        expect(text.length, greaterThan(150));
+
+        final comment = DartScaffold.docComment(text);
+        final lines = comment.trimRight().split('\n');
+
+        expect(lines.length, greaterThan(1));
+        for (final line in lines) {
+          expect(line, startsWith('/// '));
+          expect(line.length, lessThanOrEqualTo(80));
+        }
+        expect(comment, contains('Map&lt;String, int&gt;'));
+        expect(comment, contains('List&lt;T&gt;'));
+        expect(comment, isNot(contains('<')));
+        expect(comment, endsWith('\n'));
+      });
+
+      test('keeps a short text on one line', () {
+        expect(
+          DartScaffold.docComment('  Short   text. '),
+          '/// Short text.\n',
+        );
+      });
+    });
+
+    group('write() with long values', () {
+      test('keeps every generated comment and string within 80', () {
+        final long = 'A ${'very ' * 30}long description with <T>.';
+        final name = 'gg_${'long_name_' * 4}x';
+        scaffold.write(
+          dir,
+          RepoSpec.example(name: name, description: long, cli: true),
+        );
+
+        final library = read('lib/$name.dart');
+        for (final line in library.split('\n')) {
+          expect(line.length, lessThanOrEqualTo(80));
+        }
+        expect(library, contains('&lt;T&gt;'));
+        expect(
+          read('lib/src/$name.dart'),
+          contains("'The command line interface of '\n      '$name.';"),
         );
       });
     });

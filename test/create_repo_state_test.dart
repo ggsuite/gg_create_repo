@@ -63,6 +63,32 @@ void main() {
       expect(json.indexOf('scaffold'), lessThan(json.indexOf('push')));
     });
 
+    test('save() writes the state without marking a step', () {
+      CreateRepoState.example().save(d);
+      final loaded = CreateRepoState.load(d)!;
+      expect(loaded.done, isEmpty);
+      expect(loaded.spec.slug, RepoSpec.example().slug);
+    });
+
+    test('load() names the file it cannot read', () {
+      CreateRepoState.fileIn(d)
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync('{"spec": {}, "done": ["renamedStep"]}');
+      expect(
+        () => CreateRepoState.load(d),
+        throwsA(
+          isA<Exception>().having(
+            (e) => '$e',
+            'message',
+            allOf(contains('create_repo_state.json'), contains('move it')),
+          ),
+        ),
+      );
+
+      CreateRepoState.fileIn(d).writeAsStringSync('not json');
+      expect(() => CreateRepoState.load(d), throwsA(isA<Exception>()));
+    });
+
     test('delete() removes the file, and is fine without one', () {
       CreateRepoState.example().markDone(CreateStep.scaffold, d);
       expect(CreateRepoState.fileIn(d).existsSync(), isTrue);
