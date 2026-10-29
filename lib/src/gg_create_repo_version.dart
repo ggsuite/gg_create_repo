@@ -9,4 +9,4 @@
 // coverage:ignore-file
 
 /// The version of the `gg_create_repo` package.
-const String ggCreateRepoVersion = '0.0.2';
+const String ggCreateRepoVersion = '0.0.3';
