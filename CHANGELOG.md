@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Use gg_interact 0.1.0
+
 ## 0.0.2 - 2026-10-19
 
 ### Added

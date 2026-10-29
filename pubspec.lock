@@ -325,10 +325,10 @@ packages:
     dependency: "direct main"
     description:
       name: gg_interact
-      sha256: "03cb7f952ea01f52c92c7ad632b63dc5999b76274eb7b094d86cf0bc2df5d04e"
+      sha256: "71ad34a05c00a6efb9bbd6628b1bff8b20707eec6365f6af5b5b6cf7f4f52ece"
       url: "https://pub.dev"
     source: hosted
-    version: "0.0.2"
+    version: "0.1.0"
   gg_is_flutter:
     dependency: transitive
     description:
@@ -381,10 +381,10 @@ packages:
     dependency: "direct main"
     description:
       name: gg_one_core
-      sha256: "3f3fc58088ff802f96a98236ec16418846642cc16d45fcacc4452bb52352943b"
+      sha256: "416db55ca0fd37458cd9b68bfc38ca0eba33865f9b3aacc994f4f2f4cf84a5b4"
       url: "https://pub.dev"
     source: hosted
-    version: "2.14.0"
+    version: "2.15.1"
   gg_process:
     dependency: "direct main"
     description:
