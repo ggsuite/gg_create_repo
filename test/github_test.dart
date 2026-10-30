@@ -295,6 +295,21 @@ void main() {
         final https = GitHub(processWrapper: _FakeGh((_) => _fail()));
         expect(await https.cloneUrl('o/r'), 'https://github.com/o/r.git');
       });
+
+      test('prefers the protocol configured for github.com', () async {
+        final fake = _FakeGh(
+          (args) => _ok(args.contains('github.com') ? 'ssh\n' : 'https\n'),
+        );
+        final gh = GitHub(processWrapper: fake);
+        expect(await gh.cloneUrl('o/r'), 'git@github.com:o/r.git');
+        expect(fake.calls.single, [
+          'config',
+          'get',
+          'git_protocol',
+          '--host',
+          'github.com',
+        ]);
+      });
     });
 
     // #########################################################################

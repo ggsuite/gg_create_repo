@@ -147,9 +147,17 @@ class GitHub {
   ], 'create ${spec.slug} on GitHub');
 
   // ...........................................................................
-  /// The URL to clone [slug] with, matching the configured git protocol.
+  /// The URL to clone [slug] with, matching the git protocol gh has
+  /// configured for github.com. gh falls back to the global setting when the
+  /// host has none.
   Future<String> cloneUrl(String slug) async {
-    final protocol = (await _gh(['config', 'get', 'git_protocol']))?.trim();
+    final protocol = (await _gh([
+      'config',
+      'get',
+      'git_protocol',
+      '--host',
+      'github.com',
+    ]))?.trim();
     return protocol == 'ssh'
         ? 'git@github.com:$slug.git'
         : 'https://github.com/$slug.git';
