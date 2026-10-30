@@ -2,14 +2,9 @@
 
 ## Unreleased
 
-### Added
-
-- Add blog post and index.jsonc
-
-### Changed
+### Fixed
 
 - Use the git protocol gh has set for github.com for new repos
-- Merge the clone URL tests
 
 ## 0.0.3 - 2026-10-29
 
