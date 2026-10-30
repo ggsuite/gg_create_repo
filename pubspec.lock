@@ -306,13 +306,12 @@ packages:
     source: hosted
     version: "2.2.3"
   gg_git:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
-      name: gg_git
-      sha256: "947aedb7121802be956c740e3df404865b3022568dc24041a2bd88152d6ba77f"
-      url: "https://pub.dev"
-    source: hosted
-    version: "4.5.5"
+      path: "../gg_git"
+      relative: true
+    source: path
+    version: "4.6.0"
   gg_hash:
     dependency: transitive
     description:
@@ -372,18 +371,16 @@ packages:
   gg_one_commit:
     dependency: "direct main"
     description:
-      name: gg_one_commit
-      sha256: "71b065beaee58d3c1feb9ba7924564a654398abb56aecda0fc087381e3f737fd"
-      url: "https://pub.dev"
-    source: hosted
+      path: "../gg_one_commit"
+      relative: true
+    source: path
     version: "2.9.0"
   gg_one_core:
     dependency: "direct main"
     description:
-      name: gg_one_core
-      sha256: "8ca5702d6151b9c6f8d8e0364e22e37d2467a0fc75b978bf60b4cb4709371d2f"
-      url: "https://pub.dev"
-    source: hosted
+      path: "../gg_one_core"
+      relative: true
+    source: path
     version: "2.16.0"
   gg_process:
     dependency: "direct main"
@@ -402,12 +399,11 @@ packages:
     source: hosted
     version: "2.2.3"
   gg_publish:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
-      name: gg_publish
-      sha256: "49b5dac2c2822185d18add578f1014dbc88d948cff54dceabccaeaae690deb9a"
-      url: "https://pub.dev"
-    source: hosted
+      path: "../gg_publish"
+      relative: true
+    source: path
     version: "4.10.2"
   gg_status_printer:
     dependency: "direct main"
@@ -426,12 +422,11 @@ packages:
     source: hosted
     version: "3.3.4"
   gg_version:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
-      name: gg_version
-      sha256: "73220efa111e68e9c59be6bc2af62bbe3a0ec93ba12141c939845a05920c7220"
-      url: "https://pub.dev"
-    source: hosted
+      path: "../gg_version"
+      relative: true
+    source: path
     version: "5.7.2"
   glob:
     dependency: transitive
