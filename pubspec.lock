@@ -306,7 +306,7 @@ packages:
     source: hosted
     version: "2.2.3"
   gg_git:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: gg_git
       sha256: "2937d71318553ce07a7b5a90811c54d124bfc5d9276a3e5d27c186063e0086a1"
