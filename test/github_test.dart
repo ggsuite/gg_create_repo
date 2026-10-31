@@ -14,9 +14,10 @@ import 'package:test/test.dart';
 
 /// Answers `gh` calls from a script: gh talks to GitHub over the network.
 class _FakeGh extends GgProcessWrapper {
-  _FakeGh(this.answer);
+  _FakeGh(this.answer, {this.executable = 'gh'});
 
   final ProcessResult Function(List<String> args) answer;
+  final String executable;
   final calls = <List<String>>[];
 
   @override
@@ -30,7 +31,7 @@ class _FakeGh extends GgProcessWrapper {
     Encoding? stdoutEncoding,
     Encoding? stderrEncoding,
   }) async {
-    expect(executable, 'gh');
+    expect(executable, this.executable);
     calls.add(arguments);
     return answer(arguments);
   }
@@ -86,6 +87,53 @@ void main() {
           ),
         );
         expect(await gh.authProblem(), contains('gh auth login'));
+      });
+    });
+
+    // #########################################################################
+    group('sshProblem()', () {
+      final spec = RepoSpec.example(org: 'o', name: 'r');
+      late List<List<String>> calls;
+
+      Future<String?> problem(ProcessResult Function(List<String>) answer) {
+        final ssh = _FakeGh(answer, executable: 'ssh');
+        calls = ssh.calls;
+        return GitHub(processWrapper: ssh).sshProblem(spec);
+      }
+
+      test('is null when GitHub greets the key, asking nothing', () async {
+        const hi = "Hi me! You've successfully authenticated, but no shell.";
+        expect(await problem((_) => _fail(hi)), isNull);
+        expect(calls.single, containsAll(['BatchMode=yes', 'git@github.com']));
+      });
+
+      test('names unknown and changed host keys, refused keys, missing ssh '
+          'and other failures', () async {
+        expect(
+          await problem((_) => _fail('Host key verification failed.')),
+          contains('SSH does not know github.com'),
+        );
+        expect(
+          await problem(
+            (_) => _fail(
+              'WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!\n'
+              'Host key verification failed.',
+            ),
+          ),
+          contains('ssh-keygen -R github.com'),
+        );
+        expect(
+          await problem((_) => _fail('Permission denied (publickey).')),
+          contains('ssh-keygen -t ed25519'),
+        );
+        expect(
+          await problem((_) => throw const ProcessException('ssh', [])),
+          contains('ssh is not installed'),
+        );
+        expect(
+          await problem((_) => _fail('Connection timed out')),
+          contains('failed: Connection timed out'),
+        );
       });
     });
 
@@ -288,21 +336,9 @@ void main() {
 
     // #########################################################################
     group('cloneUrl()', () {
-      test('follows the git protocol gh has set for github.com', () async {
-        final fake = _FakeGh((_) => _ok('ssh\n'));
-        final ssh = GitHub(processWrapper: fake);
-        expect(await ssh.cloneUrl('o/r'), 'git@github.com:o/r.git');
-
-        final https = GitHub(processWrapper: _FakeGh((_) => _fail()));
-        expect(await https.cloneUrl('o/r'), 'https://github.com/o/r.git');
-
-        expect(fake.calls.single, [
-          'config',
-          'get',
-          'git_protocol',
-          '--host',
-          'github.com',
-        ]);
+      test('is the ssh url of the spec', () async {
+        final spec = RepoSpec.example();
+        expect(await const GitHub().cloneUrl(spec), spec.cloneUrl);
       });
     });
 

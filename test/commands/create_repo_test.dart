@@ -84,6 +84,7 @@ class _Tools extends GgProcessWrapper {
     final call = arguments.join(' ');
     final out = switch (call) {
       '--version' when executable == 'dart' => 'Dart SDK version: 3.9.2',
+      _ when executable == 'ssh' => "Hi! You've successfully authenticated",
       '--version' => 'version 2.60.0',
       _ when call.contains('users/ggsuite') => 'HTTP/2 200\n\nOrganization',
       _ when call.contains('memberships') => 'HTTP/2 200\n\nactive\tadmin',
@@ -120,7 +121,7 @@ class _LocalGitHub extends GitHub {
   }
 
   @override
-  Future<String> cloneUrl(String slug) async =>
+  Future<String> cloneUrl(RepoSpec spec) async =>
       unreachable ? p.join(bare.path, 'missing') : bare.path;
 
   @override

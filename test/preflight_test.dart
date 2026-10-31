@@ -98,6 +98,10 @@ void main() {
   late Set<String> unreachable;
 
   const slug = 'ggsuite/gg_example_repo';
+  const ssh = 'ssh -T -o BatchMode=yes -o ConnectTimeout=10 git@github.com';
+  const sshWelcome =
+      "Hi ada! You've successfully authenticated, but GitHub does not "
+      'provide shell access.';
   const pub = 'https://pub.dev/api/packages';
 
   String api(String path, [String? jq]) =>
@@ -172,6 +176,7 @@ void main() {
       'git config user.email': () => _ok('test@example.com\n'),
       'gh --version': () => _ok('gh version 2.60.0\n'),
       'gh auth status': () => _ok(),
+      ssh: () => _fail(sshWelcome),
       'gh api user --jq .login': () => _ok('ada\n'),
       'dart --version': () => _ok('Dart SDK version: 3.9.2 (stable)\n'),
       'flutter --version': () => _ok('Flutter 3.35.0\n'),
@@ -225,6 +230,11 @@ void main() {
       test('gh must be logged in', () async {
         answer('gh auth status', () => _fail());
         expect(await errors(), [contains('not logged in')]);
+      });
+
+      test('ssh must reach GitHub', () async {
+        answer(ssh, () => _fail('Permission denied (publickey).'));
+        expect(await errors(), [contains('github.com refused your SSH key')]);
       });
 
       test('without gh, GitHub is not asked', () async {

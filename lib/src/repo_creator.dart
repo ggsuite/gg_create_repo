@@ -229,7 +229,7 @@ class RepoCreator {
 
   // ...........................................................................
   Future<void> _push(RepoSpec spec, Directory dir) async {
-    final url = await _gitHub.cloneUrl(spec.slug);
+    final url = await _gitHub.cloneUrl(spec);
     final remotes = await _git(dir, ['remote']);
     final has = remotes.split('\n').map((r) => r.trim()).contains('origin');
     await _git(dir, ['remote', if (has) 'set-url' else 'add', 'origin', url]);
