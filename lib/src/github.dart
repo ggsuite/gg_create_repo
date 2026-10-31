@@ -7,6 +7,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:gg_git/gg_git.dart' show SshHostKeys;
 import 'package:gg_process/gg_process.dart';
 import 'package:mocktail/mocktail.dart';
 
@@ -40,7 +41,7 @@ class RemoteRepo {
   final bool? isPrivate;
 }
 
-/// The GitHub operations of gg_create_repo, all through the `gh` CLI.
+/// The GitHub operations of gg_create_repo, through the `gh` CLI and ssh.
 class GitHub {
   /// Constructor
   const GitHub({GgProcessWrapper processWrapper = const GgProcessWrapper()})
@@ -62,6 +63,30 @@ class GitHub {
       return 'The GitHub CLI is not logged in. Run »gh auth login«.';
     }
     return null;
+  }
+
+  // ...........................................................................
+  /// Why the repository of [spec] cannot be pushed over ssh, `null` when it
+  /// can: new repositories are always pushed over ssh. Never asks.
+  Future<String?> sshProblem(RepoSpec spec) async {
+    final ProcessResult result;
+    try {
+      result = await _process.run('ssh', [
+        '-T',
+        '-o',
+        'BatchMode=yes',
+        '-o',
+        'ConnectTimeout=10',
+        'git@github.com',
+      ], stdoutEncoding: utf8);
+    } on ProcessException {
+      return 'ssh is not installed. gg pushes new repositories over ssh.';
+    }
+    final out = '${result.stdout}${result.stderr}'.trim();
+    if (out.contains('successfully authenticated')) return null;
+    return SshHostKeys.setupHint(spec.cloneUrl, out) ??
+        'gg pushes new repositories over ssh, but '
+            '»ssh -T git@github.com« failed: $out';
   }
 
   // ...........................................................................
@@ -147,21 +172,9 @@ class GitHub {
   ], 'create ${spec.slug} on GitHub');
 
   // ...........................................................................
-  /// The URL to clone [slug] with, matching the git protocol gh has
-  /// configured for github.com. gh falls back to the global setting when the
-  /// host has none.
-  Future<String> cloneUrl(String slug) async {
-    final protocol = (await _gh([
-      'config',
-      'get',
-      'git_protocol',
-      '--host',
-      'github.com',
-    ]))?.trim();
-    return protocol == 'ssh'
-        ? 'git@github.com:$slug.git'
-        : 'https://github.com/$slug.git';
-  }
+  /// The URL the repository of [spec] is pushed to; tests point it to a
+  /// local bare repository.
+  Future<String> cloneUrl(RepoSpec spec) async => spec.cloneUrl;
 
   // ...........................................................................
   /// Sets the merge settings gg needs: squash only and auto-merge.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.5 - 2026-10-31
+
+### Changed
+
+- Push new repos always over ssh and check ssh before creating them
+
 ## 0.0.4 - 2026-10-30
 
 ### Fixed

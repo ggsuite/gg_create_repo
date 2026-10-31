@@ -77,9 +77,13 @@ class Preflight {
     void warn(String m) => findings.add(Finding(FindingLevel.warning, m));
     void info(String m) => findings.add(Finding(FindingLevel.info, m));
 
+    // The ssh round trip to GitHub runs while the local checks run.
+    final sshCheck = _gitHub.sshProblem(spec);
     await _checkGit(error);
     final ghProblem = await _gitHub.authProblem();
     if (ghProblem != null) error(ghProblem);
+    final sshProblem = await sshCheck;
+    if (sshProblem != null) error(sshProblem);
     await _checkTools(spec, error, warn);
     await _checkTarget(host.targetDir(spec), resumes, error, warn, info);
     if (ghProblem == null) await _checkGitHub(spec, resumes, error, info);

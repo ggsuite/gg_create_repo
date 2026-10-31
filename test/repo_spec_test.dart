@@ -81,6 +81,7 @@ void main() {
       expect(dart.npmScope, 'ggsuite');
       expect(dart.packageName, 'gg_x');
       expect(dart.webUrl, 'https://github.com/GgSuite/gg_x');
+      expect(dart.cloneUrl, 'git@github.com:GgSuite/gg_x.git');
 
       final ts = RepoSpec.example(
         language: RepoLanguage.typescript,

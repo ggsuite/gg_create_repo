@@ -86,7 +86,7 @@ class _GitHub extends GitHub {
   }
 
   @override
-  Future<String> cloneUrl(String slug) async => bare.path;
+  Future<String> cloneUrl(RepoSpec spec) async => bare.path;
 
   @override
   Future<void> applyMergeSettings(String slug) async {

@@ -113,6 +113,9 @@ class RepoSpec {
   /// The web URL of the repository on GitHub.
   String get webUrl => 'https://github.com/$slug';
 
+  /// The URL git pushes to and fetches from: always ssh.
+  String get cloneUrl => 'git@github.com:$slug.git';
+
   /// The name of the repository, folder and package (without scope).
   final String name;
 
