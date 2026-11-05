@@ -156,6 +156,11 @@ void main() {
           }
         }
         expect(read('eslint.config.js'), contains('typescript-eslint'));
+        expect(
+          read('eslint.config.js'),
+          contains("'.claude/'"),
+          reason: 'The hooks the DNA puts below .claude/ are no package code',
+        );
         expect(read('src/index.ts'), contains("export * from './my-lib.ts';"));
         expect(read('src/my-lib.ts'), contains('export class MyLib {'));
         expect(
