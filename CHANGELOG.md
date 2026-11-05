@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Ignore .claude/ in the ESLint config of new TypeScript repos
+
 ## 0.0.5 - 2026-10-31
 
 ### Changed
