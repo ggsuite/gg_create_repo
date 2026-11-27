@@ -1,6 +1,6 @@
 ---
 name: code
-description: Checks the code of this repo against the code guide and reports what breaks the conventions. Use when the user says "/code" or asks for a structure review.
+description: Checks the code of this repo against the code guide and reports what breaks the conventions. Use when the user says "/code" or asks for a review of the code conventions of files and functions.
 ---
 
 <!--
@@ -13,7 +13,7 @@ found in the LICENSE file in the root of this package.
 
 # Code
 
-Read `doc/guides/code-guide.md` and follow it. Read the guide for the
+Read `doc/en/guides/code-guide.md` and follow it. Read the guide for the
 language of this repo as well — `code-guide-dart.md` or
 `code-guide-typescript.md` next to it — and apply whichever one matches
 what the repo is written in.
@@ -28,6 +28,11 @@ not match its main type, and a source file without its test file.
 Report public members without a doc comment, mutable public fields,
 classes without an `example` constructor, and types whose members are
 out of the documented order.
+
+Report every real identifier of the organization in examples, tests and
+docs — bundle IDs, application IDs, domains, URLs, mail and IP
+addresses — that should be a placeholder such as `com.example.<app>` or
+`example.com`.
 
 ## 3. Check the lints
 
