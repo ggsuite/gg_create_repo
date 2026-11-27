@@ -86,7 +86,4 @@ inside gg (`gg do create repo`, wired in `gg_multi_workspace`).
   against a local bare repository (also for TypeScript).
 
 <!-- helix:claude_md:start -->
-
-@.claude/CLAUDE_dna_gg.md
-
 <!-- helix:claude_md:end -->
